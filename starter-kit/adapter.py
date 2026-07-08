@@ -6,7 +6,9 @@ LoomQ 量子接入平权计划 - 统一适配器接口 (契约 B)
 我们已为你默认打通了各平台的模拟测试与动态 Mock 机制，确保本地 evaluator.py 能够零配置一键跑通。
 """
 
+import os
 import re
+import tempfile
 import time
 import uuid
 from typing import Tuple, List, Dict, Any
@@ -21,6 +23,7 @@ except ImportError:
 # 量旋与本源依赖（选手按需解注释安装）
 try:
     import spinqit as sq
+    from spinqit import get_compiler, get_basic_simulator, BasicSimulatorConfig
 except ImportError:
     sq = None
 
@@ -33,16 +36,16 @@ except ImportError:
 def transpile(qasm_str: str, target: str) -> str:
     """
     将标准 OpenQASM 2.0 转换为对应后端的原生指令。
-    
+
     参数:
         qasm_str (str): 输入的标准 OpenQASM 2.0 线路代码。
         target (str): 目标平台，可选值为 'braket', 'spinq', 'originq'。
-        
+
     返回:
         str: 目标后端原生指令。
     """
     target = target.lower()
-    
+
     if target == "braket":
         # AWS Braket 底层使用 OpenQASM 3.0。
         # 简单转换占位实现
@@ -54,7 +57,7 @@ def transpile(qasm_str: str, target: str) -> str:
             if line.startswith("OPENQASM 2.0;"):
                 lines.append("OPENQASM 3.0;")
                 continue
-            
+
             if line.startswith("qreg "):
                 parts = line.replace("qreg ", "").replace(";", "").strip()
                 name, size = parts.split("[")
@@ -74,16 +77,16 @@ def transpile(qasm_str: str, target: str) -> str:
             else:
                 lines.append(line)
         return "\n".join(lines)
-        
+
     elif target == "spinq":
         return qasm_str
-        
+
     elif target == "originq":
         if pq is not None:
             # 选手可使用 pyqpanda 的原生转译
             return "/* OriginIR Output */"
         return "/* OriginIR Mock Output */"
-        
+
     else:
         raise ValueError(f"不支持的目标后端: {target}")
 
@@ -93,18 +96,18 @@ def run(qasm_str: str, target: str, shots: int = 1024) -> dict:
     运行 OpenQASM 2.0 线路，返回符合大赛约定的统一规范 JSON 字典。
     """
     target = target.lower()
-    
+
     if target == "braket":
         if LocalSimulator is None:
             raise ImportError("请先安装 amazon-braket-sdk (uv pip install amazon-braket-sdk 或 pip install amazon-braket-sdk)")
-        
+
         qasm_3 = transpile(qasm_str, "braket")
         device = LocalSimulator()
         program = Program(source=qasm_3)
         task = device.run(program, shots=shots)
         result = task.result()
         counts = result.measurement_counts
-        
+
         return {
             "backend": "aws_local_simulator",
             "job_id": result.task_metadata.id,
@@ -116,9 +119,50 @@ def run(qasm_str: str, target: str, shots: int = 1024) -> dict:
                 "depth": len(result.measured_qubits)
             }
         }
-        
+
     elif target == "spinq":
-        if sq is None:
+        if sq is not None:
+            # ── 真实 SpinQit 调用（官方 API：spinqit 0.2.x）──
+            # 1. 将 QASM 字符串写入临时文件
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".qasm", delete=False, encoding="utf-8"
+            )
+            try:
+                tmp.write(qasm_str)
+                tmp.close()
+                # 2. 使用 QASM 编译器编译为中间表示 (IR)
+                comp = get_compiler("qasm")
+                ir = comp.compile(tmp.name, 0)
+            finally:
+                os.unlink(tmp.name)
+            # 3. 使用 BasicSimulator 执行
+            engine = get_basic_simulator()
+            config = BasicSimulatorConfig()
+            config.configure_shots(shots)
+            raw = engine.execute(ir, config)
+            counts = raw.counts
+
+            # 4. 获取量子比特数并归一化 counts key
+            n_qubits = ir.qnum
+            normalized_counts = {str(k): v for k, v in counts.items()}
+
+            # 优先读取真实 job_id，不可用时回退到与 run_spinq.py 一致的格式
+            job_id = (
+                getattr(raw, 'job_id', None)
+                or getattr(raw, 'task_id', None)
+                or f"spinq-local-{hash(qasm_str) & 0xFFFF:04x}"
+            )
+
+            return {
+                "backend": "spinq_basic_simulator",
+                "job_id": job_id,
+                "shots": shots,
+                "counts": normalized_counts,
+                "bit_order": "little",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "meta": {"qubits_count": n_qubits},
+            }
+        else:
             # 动态自适应 Mock 机制，确保首跑通过
             if "qreg q[3]" in qasm_str or "qubit[3]" in qasm_str or "q[3]" in qasm_str:
                 mock_counts = {"000": shots // 2, "111": shots - (shots // 2)}
@@ -133,8 +177,7 @@ def run(qasm_str: str, target: str, shots: int = 1024) -> dict:
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "meta": {"is_mock": True}
             }
-        # 【选手实现】：真实的 SpinQit 运行逻辑
-        
+
     elif target == "originq":
         if pq is None:
             if "qreg q[3]" in qasm_str or "qubit[3]" in qasm_str or "q[3]" in qasm_str:
@@ -151,7 +194,7 @@ def run(qasm_str: str, target: str, shots: int = 1024) -> dict:
                 "meta": {"is_mock": True}
             }
         # 【选手实现】：真实的 pyqpanda 运行逻辑
-        
+
     else:
         raise ValueError(f"不支持的目标后端: {target}")
 
@@ -161,11 +204,11 @@ def agent_chat(prompt: str) -> str:
     [Level 2 智能体交互接口]
     输入用户的自然语言意图、包含错误的代码、或者后端选型咨询，返回智能响应。
     选手在此处应连接真实的 LLM API（如 Gemini/GPT），进行 Prompt 引导或 Agent 反馈。
-    
+
     为了方便选手在本地零环境冷启动测试，我们内置了标准测试 Prompt 的自适应响应：
     """
     prompt = prompt.strip()
-    
+
     # 场景 1：意图生成 QASM 2.0
     if "最大纠缠态" in prompt or "GHZ" in prompt:
         return """
@@ -179,7 +222,7 @@ def agent_chat(prompt: str) -> str:
         cx q[1], q[2];
         measure q -> c;
         """
-        
+
     # 场景 2：代码纠错并修复
     elif "语法错误" in prompt or "CX" in prompt:
         return """
@@ -192,7 +235,7 @@ def agent_chat(prompt: str) -> str:
         cx q[0], q[1];
         measure q -> c;
         """
-        
+
     # 场景 3：智能选后端
     elif "15 个量子比特" in prompt or "选哪个平台" in prompt:
         return (
@@ -200,7 +243,7 @@ def agent_chat(prompt: str) -> str:
             "因为目前真实的量子物理真机（如量旋 Taurus 或本源悟空）比特数有限且任务排队可能长达数小时，"
             "使用本地模拟器可以完美实现 15 比特并行仿真计算且无需等待排队。"
         )
-        
+
     # 选手连接大模型实现
     # TODO: 编写 LLM API 接入与 Prompt 解析代码
     return "抱歉，作为 LoomQ 智能体，我尚未接入真实大模型 API。请输入标准测试指令以进行测试。"

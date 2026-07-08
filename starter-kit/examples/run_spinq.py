@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """
 量旋 SpinQit 平台接入最小可跑示例
-演示如何导入 OpenQASM 2.0 并使用 SpinQit 运行于本地 Taurus 模拟器。
+演示如何导入 OpenQASM 2.0 并使用 SpinQit 运行于本地模拟器。
+基于官方文档：spinqit 0.2.x API
 """
 
 import json
+import tempfile
+import os
 
 try:
     import spinqit as sq
+    from spinqit import get_compiler, get_basic_simulator, BasicSimulatorConfig
 except ImportError:
     sq = None
+
 
 def run_on_spinq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     if sq is None:
@@ -24,33 +29,45 @@ def run_on_spinq_simulator(qasm_str: str, shots: int = 1024) -> dict:
             "meta": {"info": "Mock data since spinqit is not installed"}
         }
 
-    # 1. 解析 QASM 2.0 字符串为 SpinQit Program 对象
-    # SpinQit 提供原生从 QASM 转 Program 的函数
+    # 1. 将 QASM 2.0 字符串写入临时文件（QASMCompiler 接受文件路径）
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".qasm", delete=False, encoding="utf-8"
+    )
     try:
-        prog = sq.qasm_to_program(qasm_str)
-    except Exception as e:
-        raise RuntimeError(f"SpinQit 导入 QASM 失败: {e}")
+        tmp.write(qasm_str)
+        tmp.close()
+        # 2. 使用 QASM 编译器编译为中间表示 (IR)
+        comp = get_compiler("qasm")
+        ir = comp.compile(tmp.name, 0)
+    finally:
+        os.unlink(tmp.name)
 
-    # 2. 初始化后端 (如本地 Taurus 模拟器，或云端超导真机后端)
-    # 本地模拟器为 Taurus
-    backend = sq.Taurus()
+    # 3. 初始化 BasicSimulator 后端并配置 shots
+    engine = get_basic_simulator()
+    config = BasicSimulatorConfig()
+    config.configure_shots(shots)
 
-    # 3. 运行程序并获取结果
-    # counts 格式一般为 {'00': 512, '11': 512}
-    result = backend.run(prog, shots=shots)
+    # 4. 运行程序并获取结果
+    result = engine.execute(ir, config)
+    # spinqit 0.2.x 的 counts 直接返回二进制字符串 key 格式 {'00': ..., '11': ...}
     counts = result.counts
 
     return {
-        "backend": "spinq_taurus_simulator",
-        "job_id": getattr(result, "job_id", "spinq-taurus-local"),
+        "backend": "spinq_basic_simulator",
+        "job_id": (
+            getattr(result, 'job_id', None)
+            or getattr(result, 'task_id', None)
+            or f"spinq-local-{hash(qasm_str) & 0xFFFF:04x}"
+        ),
         "shots": shots,
-        "counts": counts,
+        "counts": {str(k): v for k, v in counts.items()},
         "bit_order": "little",
         "timestamp": "2026-07-06T10:00:00Z",
         "meta": {
-            "qubits_count": prog.qubit_num if hasattr(prog, 'qubit_num') else "unknown"
+            "qubits_count": ir.qnum,
         }
     }
+
 
 def main():
     qasm_str = """
@@ -69,6 +86,7 @@ def main():
     res = run_on_spinq_simulator(qasm_str, shots=1024)
     print("\n运行并标准化后的统一输出结果:")
     print(json.dumps(res, indent=2))
+
 
 if __name__ == "__main__":
     main()

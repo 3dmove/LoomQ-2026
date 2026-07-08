@@ -2,8 +2,12 @@
 numpy>=1.20.0
 scipy>=1.7.0
 pydantic>=2.0.0
-amazon-braket-sdk>=1.50.0
+amazon-braket-sdk==1.50.0
+setuptools<70
 # spinqit
 # pyqpanda
-# 注：量旋 (spinqit) 和本源 (pyqpanda) SDK，选手可根据自身平台需要解开注释进行安装。
-# 在 Apple Silicon (M1/M2/M3 Mac) 上，pyqpanda 建议采用官方预编译的 Wheel 包或使用 Docker 环境。
+# 注：
+# - amazon-braket-sdk 锁定 1.50.0，其依赖链 openpulse==0.4.2 → antlr4-python3-runtime==4.9.2
+# - setuptools<70 是为了兼容老版 braket SDK 中的 pkg_resources 导入
+# - 量旋 (spinqit) 和本源 (pyqpanda) SDK，选手可根据自身平台需要解开注释进行安装。
+# - 在 Apple Silicon (M1/M2/M3 Mac) 上，pyqpanda 建议采用官方预编译的 Wheel 包或使用 Docker 环境。

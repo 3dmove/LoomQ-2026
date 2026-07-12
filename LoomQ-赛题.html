@@ -448,7 +448,8 @@ cx q[0], q[1];</code></pre>
 <!-- 四、契约 -->
 <section id="contract" class="reveal">
   <div class="sec-head"><span class="sec-num">肆</span><h2>提交契约</h2></div>
-  <p>提交一个 Git 仓库，根目录提供 <code>adapter.py</code> 并实现以下接口（非 Python 技术栈的队伍可在 <code>adapter.py</code> 中通过 <code>subprocess</code> 调用自己的 CLI／二进制，评测只认接口行为）：</p>
+  <p>提交一个 Git 仓库，根目录必须提供 <code>submission.yaml</code> 与 <code>adapter.py</code>。前者声明 Starter Kit 版本、参赛 Level、运行时与网络需求；非 Python 技术栈可通过 <code>subprocess</code> 调用自己的 CLI／二进制。评测只认固定接口行为，不限制内部技术栈。</p>
+  <p>Starter Kit 合同版本为 <strong>v1.0</strong>。开赛后 v1.x 只做向后兼容更新；原样 Starter Kit 不包含可得分 Mock、评分 Prompt 答案或 L3 参考实现。</p>
   <pre><code><span class="kw">def</span> transpile(qasm_str: str, target: str) -&gt; str:
     <span class="st">"""将 OpenQASM 2.0 转译为目标后端的原生指令字符串。target ∈ {'spinq','originq','braket'}"""</span>
 
@@ -460,6 +461,7 @@ cx q[0], q[1];</code></pre>
 
 <span class="kw">def</span> compile_hybrid(hybrid_qasm_str: str) -&gt; Tuple[list, str]:
     <span class="st">"""[L3 可选] 混合编译接口。输入 Hybrid-QASM，返回 (量子操作序列, RISC-V 汇编文本)"""</span></code></pre>
+  <p><code>transpile()</code> 返回值须符合 Starter Kit 的 <code>target_ir_contract.md</code>：SpinQ 使用 OpenQASM 2.0、Braket 使用 OpenQASM 3、OriginQ 使用规范 OriginIR 子集。组织方会解析并模拟目标 IR，非空占位字符串不构成有效转译。</p>
   <p><strong>统一结果 Schema（<code>run</code> 返回值，所有后端必须一致）：</strong></p>
   <pre><code>{
   "backend": "spinq_taurus",
@@ -474,6 +476,7 @@ cx q[0], q[1];</code></pre>
     <p class="callout-title">bit order 规范</p>
     <p><code>counts</code> 的 key 是经典寄存器位串，<strong>最右侧字符为 <code>c[0]</code></strong>（即 key = <code>c[n-1]…c[1]c[0]</code>，与 Qiskit 约定一致），<code>bit_order</code> 固定填 <code>"little"</code>。跨平台位序差异必须在中间层内归一化，这正是「通用」的一部分。</p>
   </div>
+  <p>第三方依赖必须精确锁定版本。正式评测在隔离环境中逐 case 运行，私有期望值不会复制进选手仓库；公开 evaluator 的报告不是正式分数。</p>
 </section>
 
 

@@ -1,0 +1,14 @@
+contract_version: "1.0"
+starter_kit_version: "1.0.0"
+entrypoint: "adapter.py"
+levels:
+  l1: true
+  l2: false
+  l3: false
+runtime:
+  language: "python"
+  version: "3.11"
+network:
+  required_for_l1: false
+  required_for_l2: false
+  allowed_hosts: []

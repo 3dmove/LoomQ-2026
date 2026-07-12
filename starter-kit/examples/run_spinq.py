@@ -6,12 +6,12 @@
 """
 
 import json
-import tempfile
 import os
+import tempfile
 
 try:
     import spinqit as sq
-    from spinqit import get_compiler, get_basic_simulator, BasicSimulatorConfig
+    from spinqit import BasicSimulatorConfig, get_basic_simulator, get_compiler
 except ImportError:
     sq = None
 
@@ -36,9 +36,9 @@ def run_on_spinq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     try:
         tmp.write(qasm_str)
         tmp.close()
-        # 2. 使用 QASM 编译器编译为中间表示 (IR)
-        comp = get_compiler("qasm")
-        ir = comp.compile(tmp.name, 0)
+        # 2. 使用 QASM 编译器编译为中间表示（IR）
+        compiler = get_compiler("qasm")
+        ir = compiler.compile(tmp.name, 0)
     finally:
         os.unlink(tmp.name)
 
@@ -55,12 +55,12 @@ def run_on_spinq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     return {
         "backend": "spinq_basic_simulator",
         "job_id": (
-            getattr(result, 'job_id', None)
-            or getattr(result, 'task_id', None)
+            getattr(result, "job_id", None)
+            or getattr(result, "task_id", None)
             or f"spinq-local-{hash(qasm_str) & 0xFFFF:04x}"
         ),
         "shots": shots,
-        "counts": {str(k): v for k, v in counts.items()},
+        "counts": {str(key): value for key, value in counts.items()},
         "bit_order": "little",
         "timestamp": "2026-07-06T10:00:00Z",
         "meta": {

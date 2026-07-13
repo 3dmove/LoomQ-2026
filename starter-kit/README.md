@@ -29,7 +29,7 @@ starter-kit/
 
 ## 环境
 
-公开 evaluator 只使用 Python 标准库，无需安装依赖。推荐 Python 3.11，与官方基础镜像一致：
+公开 evaluator 只使用 Python 标准库，无需安装依赖。推荐 Python 3.10，与官方基础镜像一致（spinqit 最高只提供 cp310 wheel）：
 
 ```bash
 python3 evaluator.py --level l1 --target spinq,originq --json-out report.json

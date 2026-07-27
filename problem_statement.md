@@ -86,7 +86,7 @@ graph TD
 - **纠错与修复**：识别语法/语义错误，在**保持用户声明意图**的前提下修复电路。
 - **智能选后端**：根据比特数、拓扑结构、排队与成本约束推荐后端。
 
-> **要求**：Agent 必须接入真实的 LLM 推理（自备 LLM API）。评测使用**未公开的 prompt 变体**，靠关键词匹配硬编码应答无法通过（见第六节反作弊条款）。
+> **统一模型要求**：正式 L2 评分由 DeepSeek `deepseek-v4-flash` 驱动，关闭 thinking；最终答案仍由客观测试判定，不使用 LLM 充当裁判。组委会赛前不提供 API 地址、API Key、代理或额度。选手可自备 DeepSeek API，或使用其他 OpenAI-compatible 服务进行本地调试。评测使用**未公开的 prompt 变体**，靠关键词匹配硬编码应答无法通过（见第六节反作弊条款）。
 
 ### L3｜Hybrid-QASM × RISC-V 混合编译（硬核系统挑战，15 分）
 
@@ -121,7 +121,7 @@ cx q[0], q[1];
 
 ## 四、提交契约 (Submission Interface)
 
-提交一个 Git 仓库，根目录必须提供 `submission.yaml` 与 `adapter.py`。`submission.yaml` 声明 Starter Kit 版本、参赛 Level、运行时与网络需求；非 Python 技术栈可在 `adapter.py` 中通过 `subprocess` 调用自己的 CLI/二进制。评测只认固定接口行为，不限制内部技术栈。
+正式提交是选手对 `QAIDAO/LoomQ-2026` 的公开 fork，其中 **`starter-kit/` 是构建与评测根目录**，必须保留并填写 `starter-kit/submission.yaml`，同时提供 `starter-kit/adapter.py`。`submission.yaml` 声明 Starter Kit 版本、参赛 Level、运行时与网络需求；非 Python 技术栈可在 `adapter.py` 中通过 `subprocess` 调用自己的 CLI/二进制。评测只认固定接口行为，不限制内部技术栈。
 
 Starter Kit 合同版本为 **v1.0**。开赛后，v1.x 只做向后兼容的文档、诊断与公开测试更新；任何破坏性接口变更必须发布新合同版本，并保留旧版评测通道。
 
@@ -133,7 +133,7 @@ def run(qasm_str: str, target: str, shots: int) -> dict:
     """运行电路并返回符合大赛标准 Schema 的字典结果"""
 
 def agent_chat(prompt: str) -> str:
-    """[L2 可选] 智能体交互接口。输入自然语言/待修复代码，返回响应文本（内含 QASM 代码块）"""
+    """[L2 可选] 从 LOOMQ_LLM_* 环境变量读取配置，返回智能体响应文本"""
 
 def compile_hybrid(hybrid_qasm_str: str) -> Tuple[list, str]:
     """[L3 可选] 混合编译接口。输入 Hybrid-QASM，返回 (量子操作序列, RISC-V 汇编文本)"""
@@ -157,7 +157,17 @@ def compile_hybrid(hybrid_qasm_str: str) -> Tuple[list, str]:
 
 **bit order 规范**：`counts` 的 key 是经典寄存器位串，**最右侧字符为 `c[0]`**（即 key = `c[n-1]…c[1]c[0]`，与 Qiskit 约定一致），`bit_order` 固定填 `"little"`。跨平台位序差异必须在中间层内归一化——这正是"通用"的一部分。
 
-**可复现性要求**：第三方依赖必须精确锁定版本；正式评测以提交截止时记录的 commit SHA 为准，在固定 Linux 容器内构建。公开 `evaluator.py` 只用于契约自测，其输出不是正式分数。
+**L2 运行时规范**：选手程序必须通过 `LOOMQ_LLM_BASE_URL`、`LOOMQ_LLM_API_KEY` 和 `LOOMQ_LLM_MODEL` 读取模型服务配置，不得硬编码 API 地址、密钥或模型名称。正式评测时，组委会将统一注入 DeepSeek 模型服务及调用预算；评测环境不保证能够访问其他外部网络服务。完整机器可读规则见 Starter Kit 的 `l2_policy.json`。
+
+**可复现性要求**：第三方依赖必须精确锁定版本；正式评测以提交系统记录的完整 40 位 commit SHA 为准，在固定 Linux 容器内构建。公开 `evaluator.py` 只用于契约自测，其输出不是正式分数。
+
+### 最终提交流程
+
+1. 在 fork 根目录运行 `python3 starter-kit/prepare_submission.py --team-id <TEAM_ID>`，确认工作区干净、HEAD 已 push 且必需文件齐全。
+2. 在 `QAIDAO/LoomQ-2026` 中创建“LoomQ 最终提交” Issue，填写队伍 ID、fork 地址与预检输出的完整 commit SHA。
+3. 自动校验通过后，Issue 会获得 `submission:accepted` 标签和包含归档 SHA-256 的回执；只有此状态构成有效提交。
+
+**截止时间：2026 年 8 月 25 日 12:00（UTC+8）**。以 GitHub 服务器记录的 Issue `created_at` 为准，不以 commit 时间或选手本地时间为准。同队伍可在截止前通过新 Issue 重新提交，截止前最后一次通过校验的提交生效；不可编辑已有 Issue 来替换提交。
 
 ---
 
@@ -190,6 +200,8 @@ def compile_hybrid(hybrid_qasm_str: str) -> Tuple[list, str]:
   2. **代码纠错**：*"我想制备一个贝尔态，但这段代码报错了，帮我修好：`H q[0]; CX q[0] q[1]`（未定义寄存器且门名大小写错误）"* —— prompt 中**明确声明目标态**，修复产物必须在语义上实现该目标态并通过 Fidelity 验证。
   3. **智能选后端**：*"我需要运行一个 15 比特电路，且零排队等待，选哪个平台？"* —— Agent 回复须包含一个**规范后端标识**（如 `braket_local_simulator`），评测按官方《后端能力表》（比特数上限 / 排队特性 / 费用，见 Starter Kit 的 `backend_capabilities.md/json`）核对唯一正确答案集。
   - 客观分 = 各变体通过率 × 20。
+  - 正式评测使用 2 个固定私有种子，共 12 个 L2 case。每个 case 最多调用 DeepSeek 3 次，累计最多 8,000 输入 Token、2,000 输出 Token，总时限 120 秒。选手程序必须至少完成一次有效的模型服务调用，该 case 才具备得分资格；超预算或绕过模型的硬编码结果不得分。
+  - 组委会模型服务或网络发生基础设施异常时，不直接判定选手失败；服务恢复后将按统一规则复评。
 - **平权叙事与交互体验（10 分）**：评委现场测试 Agent 面对零物理背景用户的交互友好度、容错提示与结果可视化。**仅在客观分 ≥ 12 时计入**，防止"只有故事没有工具"。
 
 ### 3. L3 判定（15 分）：混合编译正确性
@@ -230,7 +242,7 @@ Starter Kit 只提供接口骨架、公开电路和公开自测，**不包含可
 2. L1 隐藏电路、L2 prompt 变体、L3 随机用例均在评测时生成，**针对公开样例硬编码输出的实现将在隐藏集上自然失败**。
 3. 决赛答辩设代码走查环节：评委将现场替换输入复测；发现关键词匹配式伪 Agent、打表式伪编译器，对应 Level 判 0 分并取消该模块奖项资格。
 4. 允许并鼓励使用 AI 辅助编程，但队伍须能现场解释系统每一部分的工作原理。
-5. 正式评测器由组织方持有，不复制到选手仓库运行；每个 case 设置 CPU、内存和超时限制，默认禁止网络。L2 若需外部 LLM，只开放 `submission.yaml` 中声明并审核通过的必要域名。
+5. 正式评测器由组织方持有，不复制到选手仓库运行；每个 case 设置 CPU、内存和超时限制，默认禁止网络。L2 由组委会统一注入模型服务配置，评测环境不保证能够访问其他外部网络服务。
 
 ---
 

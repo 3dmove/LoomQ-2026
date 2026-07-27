@@ -22,6 +22,9 @@ starter-kit/
 ├── target_ir_contract.md
 ├── requirements.txt
 ├── Dockerfile
+├── evidence/
+│   ├── README.md
+│   └── files/                # 可选附件
 ├── circuits/
 │   ├── bell.qasm
 │   └── ghz3.qasm
@@ -93,9 +96,11 @@ python3 starter-kit/prepare_submission.py --team-id <GITHUB_USERNAME>
 
 当前不使用预登记队伍名单。每队指定一个 GitHub 提交账号，该账号的用户名就是 Team ID；fork 必须归该账号所有，并由同一账号创建最终提交 Issue。其他成员仍可作为协作者参与开发。预检通过后，在上游 `QAIDAO/LoomQ-2026` 的“LoomQ 最终提交” Issue Form 中填写输出的 fork 地址和 40 位 commit SHA。出现 `submission:accepted` 标签与归档哈希回执后才算提交成功。更新代码后必须新建 Issue，截止前最后一次有效提交生效。
 
+如申报 L1 真机、L2 交互体验、工程与产品化或 Bonus，只需填写 [`evidence/README.md`](evidence/README.md)。截图、原始结果或图表可以统一放入 `evidence/files/`。证据必须随最终 commit 归档；未提交某项证据只影响对应人工分，不影响自动评分。
+
 ## L2 统一模型与环境变量
 
-正式 L2 客观评测统一使用 DeepSeek `deepseek-v4-flash`，关闭 thinking，最终答案仍由确定性的官方测试判定，不使用 LLM 充当裁判。组委会在赛前**不提供 API 地址、API Key、代理或调用额度**。选手本地可使用自己的 DeepSeek API，也可使用其他 OpenAI-compatible 服务调试；组委会只保证正式 DeepSeek 环境下的结果。
+正式 L2 客观评测统一使用 DeepSeek `deepseek-v4-flash`，最终答案仍由确定性的官方测试判定，不使用 LLM 充当裁判。组委会在赛前**不提供 API 地址、API Key、代理或调用额度**。选手本地可使用自己的 DeepSeek API，也可使用其他 OpenAI-compatible 服务调试；组委会只保证正式 DeepSeek 环境下的结果。
 
 `agent_chat(prompt: str) -> str` 接口不变。实现不得硬编码 URL、Key 或模型名，必须读取：
 
@@ -109,7 +114,7 @@ python3 starter-kit/prepare_submission.py --team-id <GITHUB_USERNAME>
 | `LOOMQ_LLM_MAX_INPUT_TOKENS` | 当前 case 累计输入 Token 上限 |
 | `LOOMQ_LLM_MAX_OUTPUT_TOKENS` | 当前 case 累计输出 Token 上限 |
 
-正式限制为每个 case 最多 3 次调用、8,000 输入 Token、2,000 输出 Token和 120 秒；两组固定私有种子共 12 个 case，因此每队理论上限为 36 次调用、96,000 输入 Token和 24,000 输出 Token。机器可读版本见 `l2_policy.json`。
+正式限制为每个 case 最多 3 次调用、8,000 输入 Token、2,000 输出 Token 和 120 秒；两组固定私有种子共 12 个 case，因此每队理论上限为 36 次调用、96,000 输入 Token 和 24,000 输出 Token。机器可读版本见 `l2_policy.json`。
 
 `llm_client.py` 是可选的无依赖传输示例，不包含 Prompt、Agent 策略或参考答案。使用自己的 DeepSeek Key 调试时可设置：
 

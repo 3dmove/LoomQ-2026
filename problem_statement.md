@@ -86,7 +86,7 @@ graph TD
 - **纠错与修复**：识别语法/语义错误，在**保持用户声明意图**的前提下修复电路。
 - **智能选后端**：根据比特数、拓扑结构、排队与成本约束推荐后端。
 
-> **统一模型要求**：正式 L2 评分由 DeepSeek `deepseek-v4-flash` 驱动，关闭 thinking；最终答案仍由客观测试判定，不使用 LLM 充当裁判。组委会赛前不提供 API 地址、API Key、代理或额度。选手可自备 DeepSeek API，或使用其他 OpenAI-compatible 服务进行本地调试。评测使用**未公开的 prompt 变体**，靠关键词匹配硬编码应答无法通过（见第六节反作弊条款）。
+> **统一模型要求**：正式 L2 评分由 DeepSeek `deepseek-v4-flash` 驱动；最终答案仍由客观测试判定，不使用 LLM 充当裁判。组委会赛前不提供 API 地址、API Key、代理或额度。选手可自备 DeepSeek API，或使用其他 OpenAI-compatible 服务进行本地调试。评测使用**未公开的 prompt 变体**，靠关键词匹配硬编码应答无法通过（见第六节反作弊条款）。
 
 ### L3｜Hybrid-QASM × RISC-V 混合编译（硬核系统挑战，15 分）
 

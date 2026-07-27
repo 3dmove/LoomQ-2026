@@ -419,7 +419,8 @@ footer p{margin-top:10px;font-size:16px;color:var(--ink-soft);letter-spacing:.08
     <li><strong>纠错与修复</strong>：识别语法／语义错误，在<strong>保持用户声明意图</strong>的前提下修复电路；</li>
     <li><strong>智能选后端</strong>：根据比特数、拓扑结构、排队与成本约束推荐后端。</li>
   </ul>
-  <p><strong>要求</strong>：Agent 必须接入真实的 LLM 推理（自备 LLM API）。评测使用<strong>未公开的 prompt 变体</strong>，靠关键词匹配硬编码应答无法通过。</p>
+  <p><strong>统一模型要求</strong>：正式 L2 评分由 DeepSeek <code>deepseek-v4-flash</code> 驱动，关闭 thinking；最终答案仍由客观测试判定，不使用 LLM 充当裁判。组委会赛前不提供 API 地址、API Key、代理或额度。选手可自备 DeepSeek API，或使用其他 OpenAI-compatible 服务进行本地调试。</p>
+  <p>正式评测使用 2 个固定私有种子，共 12 个 L2 case。每个 case 最多调用 3 次，累计最多 8,000 输入 Token、2,000 输出 Token，总时限 120 秒；至少完成一次有效的模型服务调用才具备得分资格。组委会模型服务或网络发生基础设施异常时，不直接判定选手失败，服务恢复后按统一规则复评。</p>
 
   <h3><span class="tag t3">L 3</span>Hybrid-QASM × RISC-V 混合编译（硬核挑战 · 15 分）</h3>
   <p>实现经典-量子混合程序编译。输入一段 <strong>Hybrid-QASM</strong>（语法定义见下），你的编译器需要输出两部分：</p>
@@ -448,7 +449,7 @@ cx q[0], q[1];</code></pre>
 <!-- 四、契约 -->
 <section id="contract" class="reveal">
   <div class="sec-head"><span class="sec-num">肆</span><h2>提交契约</h2></div>
-  <p>提交一个 Git 仓库，根目录必须提供 <code>submission.yaml</code> 与 <code>adapter.py</code>。前者声明 Starter Kit 版本、参赛 Level、运行时与网络需求；非 Python 技术栈可通过 <code>subprocess</code> 调用自己的 CLI／二进制。评测只认固定接口行为，不限制内部技术栈。</p>
+  <p>正式提交是选手对 <code>QAIDAO/LoomQ-2026</code> 的公开 fork，其中 <strong><code>starter-kit/</code> 是构建与评测根目录</strong>，必须提供 <code>submission.yaml</code> 与 <code>adapter.py</code>。非 Python 技术栈可通过 <code>subprocess</code> 调用自己的 CLI／二进制。</p>
   <p>Starter Kit 合同版本为 <strong>v1.0</strong>。开赛后 v1.x 只做向后兼容更新；原样 Starter Kit 不包含可得分 Mock、评分 Prompt 答案或 L3 参考实现。</p>
   <pre><code><span class="kw">def</span> transpile(qasm_str: str, target: str) -&gt; str:
     <span class="st">"""将 OpenQASM 2.0 转译为目标后端的原生指令字符串。target ∈ {'spinq','originq','braket'}"""</span>
@@ -457,7 +458,7 @@ cx q[0], q[1];</code></pre>
     <span class="st">"""运行电路并返回符合大赛标准 Schema 的字典结果"""</span>
 
 <span class="kw">def</span> agent_chat(prompt: str) -&gt; str:
-    <span class="st">"""[L2 可选] 智能体交互接口。输入自然语言/待修复代码，返回响应文本（内含 QASM 代码块）"""</span>
+    <span class="st">"""[L2 可选] 从 LOOMQ_LLM_* 环境变量读取配置，返回智能体响应文本"""</span>
 
 <span class="kw">def</span> compile_hybrid(hybrid_qasm_str: str) -&gt; Tuple[list, str]:
     <span class="st">"""[L3 可选] 混合编译接口。输入 Hybrid-QASM，返回 (量子操作序列, RISC-V 汇编文本)"""</span></code></pre>
@@ -476,7 +477,15 @@ cx q[0], q[1];</code></pre>
     <p class="callout-title">bit order 规范</p>
     <p><code>counts</code> 的 key 是经典寄存器位串，<strong>最右侧字符为 <code>c[0]</code></strong>（即 key = <code>c[n-1]…c[1]c[0]</code>，与 Qiskit 约定一致），<code>bit_order</code> 固定填 <code>"little"</code>。跨平台位序差异必须在中间层内归一化，这正是「通用」的一部分。</p>
   </div>
-  <p>第三方依赖必须精确锁定版本。正式评测在隔离环境中逐 case 运行，私有期望值不会复制进选手仓库；公开 evaluator 的报告不是正式分数。</p>
+  <p><strong>L2 运行时规范</strong>：选手程序必须通过 <code>LOOMQ_LLM_BASE_URL</code>、<code>LOOMQ_LLM_API_KEY</code> 和 <code>LOOMQ_LLM_MODEL</code> 读取模型服务配置，不得硬编码 API 地址、密钥或模型名称。正式评测时，组委会将统一注入 DeepSeek 模型服务及调用预算；评测环境不保证能够访问其他外部网络服务。机器可读规则见 Starter Kit 的 <code>l2_policy.json</code>。</p>
+  <p>第三方依赖必须精确锁定版本。正式评测以提交系统记录的完整 40 位 commit SHA 为准，在隔离环境中逐 case 运行。</p>
+  <h3>最终提交</h3>
+  <ol>
+    <li>在 fork 根目录运行 <code>python3 starter-kit/prepare_submission.py --team-id &lt;TEAM_ID&gt;</code>。</li>
+    <li>在上游仓库创建“LoomQ 最终提交” Issue，填写队伍 ID、fork 地址与完整 SHA。</li>
+    <li>获得 <code>submission:accepted</code> 标签和归档 SHA-256 回执后才算成功。</li>
+  </ol>
+  <div class="callout plum2"><p class="callout-title">截止时间</p><p><strong>2026 年 8 月 25 日 12:00（UTC+8）</strong>。以 GitHub Issue <code>created_at</code> 为准；同队伍截止前最后一次通过校验的新 Issue 生效。</p></div>
 </section>
 
 

@@ -1,4 +1,4 @@
-# LoomQ Starter Kit v1.0.0
+# LoomQ Starter Kit v1.1.0
 
 本工具包定义参赛提交协议，并提供公开自测。它不包含正式评分器、隐藏答案、Mock 得分路径或任何 Level 的参考解答。
 
@@ -10,7 +10,10 @@ starter-kit/
 ├── CHANGELOG.md
 ├── submission.yaml
 ├── adapter.py
+├── llm_client.py
+├── l2_policy.json
 ├── evaluator.py
+├── prepare_submission.py
 ├── riscv_emulator.py
 ├── backend_capabilities.md
 ├── backend_capabilities.json
@@ -25,7 +28,7 @@ starter-kit/
 └── examples/
 ```
 
-提交时，仓库根目录必须保留并填写 `submission.yaml`，同时提供 `adapter.py`。非 Python 项目可以在 `adapter.py` 中通过 `subprocess` 调用自己的 CLI 或二进制。
+在正式 fork 中，本 `starter-kit/` 目录就是构建与评测根目录，必须保留并填写 `submission.yaml`，同时提供 `adapter.py`。非 Python 项目可以在 `adapter.py` 中通过 `subprocess` 调用自己的 CLI 或二进制。
 
 ## 环境
 
@@ -80,9 +83,48 @@ python3 evaluator.py --level l3
 
 正式评测由组织方在隔离环境运行：每个 case 使用独立进程、私有随机种子和私有期望值；提交进程不会获得理想分布文件。组织方还会分别验证目标原生 IR、真机证据、架构与交互体验。
 
-## 网络与密钥
+## 最终提交
 
-L1、L3 默认禁止网络。L2 如需 LLM API，必须在 `submission.yaml` 声明，并只列必要域名。不要把 API Key 提交进 Git；正式流程通过环境变量注入，变量名应写在项目 README 中。
+截止时间为 **2026-08-25 12:00 UTC+8**。先在 fork 根目录运行：
+
+```bash
+python3 starter-kit/prepare_submission.py --team-id <TEAM_ID>
+```
+
+预检通过后，在上游 `QAIDAO/LoomQ-2026` 的“LoomQ 最终提交” Issue Form 中填写输出的 fork 地址和 40 位 commit SHA。出现 `submission:accepted` 标签与归档哈希回执后才算提交成功。更新代码后必须新建 Issue，截止前最后一次有效提交生效。
+
+## L2 统一模型与环境变量
+
+正式 L2 客观评测统一使用 DeepSeek `deepseek-v4-flash`，关闭 thinking，最终答案仍由确定性的官方测试判定，不使用 LLM 充当裁判。组委会在赛前**不提供 API 地址、API Key、代理或调用额度**。选手本地可使用自己的 DeepSeek API，也可使用其他 OpenAI-compatible 服务调试；组委会只保证正式 DeepSeek 环境下的结果。
+
+`agent_chat(prompt: str) -> str` 接口不变。实现不得硬编码 URL、Key 或模型名，必须读取：
+
+| 环境变量 | 含义 |
+|---|---|
+| `LOOMQ_LLM_BASE_URL` | OpenAI-compatible API 根地址 |
+| `LOOMQ_LLM_API_KEY` | 当前运行凭证 |
+| `LOOMQ_LLM_MODEL` | 当前模型；正式评测为 `deepseek-v4-flash` |
+| `LOOMQ_LLM_TIMEOUT_SECONDS` | 单次请求超时 |
+| `LOOMQ_LLM_MAX_CALLS` | 当前 case 最多调用次数 |
+| `LOOMQ_LLM_MAX_INPUT_TOKENS` | 当前 case 累计输入 Token 上限 |
+| `LOOMQ_LLM_MAX_OUTPUT_TOKENS` | 当前 case 累计输出 Token 上限 |
+
+正式限制为每个 case 最多 3 次调用、8,000 输入 Token、2,000 输出 Token和 120 秒；两组固定私有种子共 12 个 case，因此每队理论上限为 36 次调用、96,000 输入 Token和 24,000 输出 Token。机器可读版本见 `l2_policy.json`。
+
+`llm_client.py` 是可选的无依赖传输示例，不包含 Prompt、Agent 策略或参考答案。使用自己的 DeepSeek Key 调试时可设置：
+
+```bash
+export LOOMQ_LLM_BASE_URL=https://api.deepseek.com
+export LOOMQ_LLM_API_KEY=<YOUR_OWN_KEY>
+export LOOMQ_LLM_MODEL=deepseek-v4-flash
+export LOOMQ_LLM_TIMEOUT_SECONDS=120
+export LOOMQ_LLM_MAX_CALLS=3
+export LOOMQ_LLM_MAX_INPUT_TOKENS=8000
+export LOOMQ_LLM_MAX_OUTPUT_TOKENS=2000
+python3 evaluator.py --level l2
+```
+
+缺少配置时应立即失败，错误信息不得包含任何 Key。正式评测时，组委会将统一注入 DeepSeek 模型服务及调用预算；评测环境不保证能够访问其他外部网络服务。若参加 L2，请把 `submission.yaml` 中的 `levels.l2` 与 `network.required_for_l2` 同时改为 `true`；`allowed_hosts` 不用于申请正式评测中的任意公网访问。
 
 ## 版本政策
 

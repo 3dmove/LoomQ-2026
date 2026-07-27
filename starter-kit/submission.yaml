@@ -1,5 +1,5 @@
 contract_version: "1.0"
-starter_kit_version: "1.0.0"
+starter_kit_version: "1.1.0"
 entrypoint: "adapter.py"
 levels:
   l1: true
@@ -12,3 +12,10 @@ network:
   required_for_l1: false
   required_for_l2: false
   allowed_hosts: []
+l2_runtime:
+  protocol: "openai_chat_completions"
+  configuration_source: "environment"
+  required_environment:
+    - "LOOMQ_LLM_BASE_URL"
+    - "LOOMQ_LLM_API_KEY"
+    - "LOOMQ_LLM_MODEL"

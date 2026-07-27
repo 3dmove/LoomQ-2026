@@ -22,7 +22,7 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
 
 
 def agent_chat(prompt: str) -> str:
-    """Optional L2 entry point. Return a response containing OpenQASM when asked."""
+    """Optional L2 entry point using the documented LOOMQ_LLM_* environment."""
     raise NotImplementedError("L2 is optional; implement agent_chat(prompt) to enter")
 
 

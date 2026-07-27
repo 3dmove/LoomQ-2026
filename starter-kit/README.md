@@ -88,10 +88,10 @@ python3 evaluator.py --level l3
 截止时间为 **2026-08-25 12:00 UTC+8**。先在 fork 根目录运行：
 
 ```bash
-python3 starter-kit/prepare_submission.py --team-id <TEAM_ID>
+python3 starter-kit/prepare_submission.py --team-id <GITHUB_USERNAME>
 ```
 
-预检通过后，在上游 `QAIDAO/LoomQ-2026` 的“LoomQ 最终提交” Issue Form 中填写输出的 fork 地址和 40 位 commit SHA。出现 `submission:accepted` 标签与归档哈希回执后才算提交成功。更新代码后必须新建 Issue，截止前最后一次有效提交生效。
+当前不使用预登记队伍名单。每队指定一个 GitHub 提交账号，该账号的用户名就是 Team ID；fork 必须归该账号所有，并由同一账号创建最终提交 Issue。其他成员仍可作为协作者参与开发。预检通过后，在上游 `QAIDAO/LoomQ-2026` 的“LoomQ 最终提交” Issue Form 中填写输出的 fork 地址和 40 位 commit SHA。出现 `submission:accepted` 标签与归档哈希回执后才算提交成功。更新代码后必须新建 Issue，截止前最后一次有效提交生效。
 
 ## L2 统一模型与环境变量
 

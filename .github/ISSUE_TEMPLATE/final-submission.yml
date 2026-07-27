@@ -5,15 +5,17 @@ body:
   - type: markdown
     attributes:
       value: |
-        截止时间：**2026-08-25 12:00 UTC+8**。请先在 fork 中运行 `python3 starter-kit/prepare_submission.py --team-id <TEAM_ID>`。
+        截止时间：**2026-08-25 12:00 UTC+8**。请先在 fork 中运行 `python3 starter-kit/prepare_submission.py --team-id <GITHUB_USERNAME>`。
+
+        本届不使用预登记名单：Team ID 必须填写当前 Issue 作者的 GitHub 用户名，fork 也必须归该账号所有。
 
         Issue 创建后不能通过编辑来更换提交。如需更新，请重新创建 Issue；截止前最后一次通过校验的提交生效。
   - type: input
     id: team_id
     attributes:
       label: Team ID
-      description: 组委会登记的队伍 ID。
-      placeholder: team-001
+      description: 填写当前 Issue 作者的 GitHub 用户名；大小写不敏感。
+      placeholder: your-github-username
     validations:
       required: true
   - type: input

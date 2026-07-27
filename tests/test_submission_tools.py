@@ -1,5 +1,6 @@
 import io
 import hashlib
+import importlib.util
 import json
 import os
 import tarfile
@@ -26,14 +27,23 @@ from competition.submission_intake import validate_issue
 SHA = "a" * 40
 
 
-def issue_body(sha=SHA):
+def load_prepare_submission():
+    path = Path(__file__).resolve().parents[1] / "starter-kit" / "prepare_submission.py"
+    spec = importlib.util.spec_from_file_location("loomq_prepare_submission_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def issue_body(sha=SHA, team_id="alice", repository="https://github.com/alice/LoomQ-2026"):
     return f"""### Team ID
 
-team-001
+{team_id}
 
 ### Fork repository
 
-https://github.com/alice/LoomQ-2026
+{repository}
 
 ### Commit SHA
 
@@ -55,14 +65,20 @@ _No response_
 """
 
 
-def event(created_at="2026-08-25T04:00:00Z", author="alice", sha=SHA):
+def event(
+    created_at="2026-08-25T04:00:00Z",
+    author="alice",
+    sha=SHA,
+    team_id="alice",
+    repository="https://github.com/alice/LoomQ-2026",
+):
     return {
         "issue": {
             "number": 7,
             "created_at": created_at,
             "html_url": "https://github.com/QAIDAO/LoomQ-2026/issues/7",
             "user": {"login": author},
-            "body": issue_body(sha),
+            "body": issue_body(sha, team_id, repository),
         }
     }
 
@@ -80,7 +96,6 @@ CONFIG = {
         "starter-kit/README.md",
     ],
 }
-TEAMS = {"teams": [{"team_id": "team-001", "github_users": ["alice", "bob"]}]}
 
 
 class FakeGitHub:
@@ -106,17 +121,34 @@ class FakeGitHub:
 
 
 class IntakeValidationTests(unittest.TestCase):
+    def test_issue_author_can_submit_without_a_roster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = validate_issue(
+                event(team_id="alice"), CONFIG, FakeGitHub(), Path(tmp) / "submission.tar.gz"
+            )
+        self.assertEqual(result["team_id"], "alice")
+
+    def test_single_character_github_login_is_a_valid_team_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = validate_issue(
+                event(author="a", team_id="a", repository="https://github.com/a/LoomQ-2026"),
+                CONFIG,
+                FakeGitHub(),
+                Path(tmp) / "submission.tar.gz",
+            )
+        self.assertEqual(result["team_id"], "a")
+
     def test_issue_parser_uses_stable_headings(self):
         fields = parse_issue_body(issue_body())
-        self.assertEqual(fields["team_id"], "team-001")
+        self.assertEqual(fields["team_id"], "alice")
         self.assertEqual(fields["commit_sha"], SHA)
         self.assertEqual(fields["hardware_evidence"], "")
 
     def test_exact_deadline_is_accepted_and_archived(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive = Path(tmp) / "submission.tar.gz"
-            result = validate_issue(event(), CONFIG, TEAMS, FakeGitHub(), archive)
-        self.assertEqual(result["team_id"], "team-001")
+            result = validate_issue(event(), CONFIG, FakeGitHub(), archive)
+        self.assertEqual(result["team_id"], "alice")
         self.assertEqual(result["commit_sha"], SHA)
         self.assertEqual(result["archive_bytes"], 7)
 
@@ -125,34 +157,60 @@ class IntakeValidationTests(unittest.TestCase):
             validate_issue(
                 event(created_at="2026-08-25T04:00:01Z"),
                 CONFIG,
-                TEAMS,
                 FakeGitHub(),
                 Path(tmp) / "submission.tar.gz",
             )
 
-    def test_unregistered_actor_is_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "不属于"):
-            validate_issue(event(author="mallory"), CONFIG, TEAMS, FakeGitHub(), Path(tmp) / "x")
+    def test_team_id_must_match_issue_author(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "Issue 作者"):
+            validate_issue(event(author="mallory"), CONFIG, FakeGitHub(), Path(tmp) / "x")
+
+    def test_fork_owner_must_match_issue_author(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "fork 所有者"):
+            validate_issue(
+                event(repository="https://github.com/bob/LoomQ-2026"),
+                CONFIG,
+                FakeGitHub(),
+                Path(tmp) / "x",
+            )
 
     def test_short_sha_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "40 位"):
-            validate_issue(event(sha="abc"), CONFIG, TEAMS, FakeGitHub(), Path(tmp) / "x")
+            validate_issue(event(sha="abc"), CONFIG, FakeGitHub(), Path(tmp) / "x")
 
     def test_missing_commit_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "不存在"):
             validate_issue(
-                event(), CONFIG, TEAMS, FakeGitHub(missing_commit=True), Path(tmp) / "x"
+                event(), CONFIG, FakeGitHub(missing_commit=True), Path(tmp) / "x"
             )
 
     def test_non_fork_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "fork network"):
             validate_issue(
-                event(), CONFIG, TEAMS, FakeGitHub(source="someone/else"), Path(tmp) / "x"
+                event(), CONFIG, FakeGitHub(source="someone/else"), Path(tmp) / "x"
             )
 
     def test_missing_required_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(SubmissionError, "缺少必需文件"):
-            validate_issue(event(), CONFIG, TEAMS, FakeGitHub(missing_file=True), Path(tmp) / "x")
+            validate_issue(event(), CONFIG, FakeGitHub(missing_file=True), Path(tmp) / "x")
+
+
+class PreflightIdentityTests(unittest.TestCase):
+    def test_preflight_rejects_team_id_that_does_not_own_origin_fork(self):
+        prepare = load_prepare_submission()
+        responses = {
+            ("status", "--porcelain"): "",
+            ("rev-parse", "HEAD"): SHA,
+            ("remote", "get-url", "origin"): "git@github.com:bob/LoomQ-2026.git",
+        }
+
+        def fake_git(*arguments, **_kwargs):
+            return responses[arguments]
+
+        with mock.patch.object(prepare, "git", side_effect=fake_git), mock.patch.object(
+            prepare.sys, "argv", ["prepare_submission.py", "--team-id", "alice"]
+        ), self.assertRaisesRegex(RuntimeError, "fork 的 GitHub 所有者"):
+            prepare.main()
 
 
 class SelectionTests(unittest.TestCase):

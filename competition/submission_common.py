@@ -19,7 +19,7 @@ from typing import Any
 
 
 RECEIPT_MARKER = "loomq-submission-receipt:v1"
-TEAM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
+TEAM_ID_RE = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$")
 COMMIT_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 FIELD_NAMES = {
     "Team ID": "team_id",
@@ -98,18 +98,8 @@ def normalize_repository_url(value: str) -> tuple[str, str]:
 def validate_team_id(value: str) -> str:
     team_id = value.strip().lower()
     if not TEAM_ID_RE.fullmatch(team_id):
-        raise SubmissionError("Team ID 必须为 2–40 位小写字母、数字或连字符")
+        raise SubmissionError("Team ID 必须是有效的 GitHub 用户名（1–39 位字母、数字或单个连字符）")
     return team_id
-
-
-def registered_team(teams: dict[str, Any], team_id: str) -> dict[str, Any]:
-    entries = [entry for entry in teams.get("teams", []) if entry.get("team_id", "").lower() == team_id]
-    if len(entries) != 1:
-        raise SubmissionError(f"Team ID {team_id!r} 未登记或重复")
-    users = entries[0].get("github_users", [])
-    if not users or not all(isinstance(user, str) and user.strip() for user in users):
-        raise SubmissionError(f"Team ID {team_id!r} 没有有效的 GitHub 成员")
-    return entries[0]
 
 
 @dataclass

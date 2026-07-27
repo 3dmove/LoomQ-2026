@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "competition" / "config.json"
-TEAM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
+TEAM_ID_RE = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$")
 
 
 def git(*arguments: str, check: bool = True) -> str:
@@ -44,7 +44,7 @@ def main() -> int:
     args = parser.parse_args()
     team_id = args.team_id.strip().lower()
     if not TEAM_ID_RE.fullmatch(team_id):
-        raise RuntimeError("Team ID 必须为 2–40 位小写字母、数字或连字符")
+        raise RuntimeError("Team ID 必须是有效的 GitHub 用户名")
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     if git("status", "--porcelain"):
         raise RuntimeError("工作区不干净；请先提交所有需要参评的文件")
@@ -52,6 +52,9 @@ def main() -> int:
     if not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
         raise RuntimeError("无法获取 40 位 HEAD SHA")
     repository = normalize_remote(git("remote", "get-url", "origin"))
+    repository_owner = repository.removeprefix("https://github.com/").split("/", 1)[0].lower()
+    if team_id != repository_owner:
+        raise RuntimeError("Team ID 必须与 origin fork 的 GitHub 所有者用户名一致")
     remote_heads = subprocess.run(
         ["git", "ls-remote", "--heads", "origin"], cwd=ROOT, text=True, capture_output=True, check=False
     )

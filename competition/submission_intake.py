@@ -26,7 +26,6 @@ from competition.submission_common import (  # noqa: E402
     normalize_repository_url,
     parse_issue_body,
     parse_timestamp,
-    registered_team,
     sha256_file,
     utc_now,
     validate_team_id,
@@ -35,7 +34,6 @@ from competition.submission_common import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "competition" / "config.json"
-TEAMS = ROOT / "competition" / "teams.json"
 LABELS = {
     "submission:accepted": ("1a7f37", "Validated and archived final submission"),
     "submission:rejected": ("b42318", "Submission failed automatic intake validation"),
@@ -59,7 +57,6 @@ def append_output(path: str | None, **values: str) -> None:
 def validate_issue(
     event: dict[str, Any],
     config: dict[str, Any],
-    teams: dict[str, Any],
     client: GitHubClient,
     archive: Path,
 ) -> dict[str, Any]:
@@ -81,16 +78,14 @@ def validate_issue(
         raise SubmissionError("必须勾选所有原创性与评测授权声明")
 
     team_id = validate_team_id(fields["team_id"])
-    team = registered_team(teams, team_id)
-    allowed_users = {user.lower() for user in team["github_users"]}
     actor = str(issue.get("user", {}).get("login", "")).lower()
-    if actor not in allowed_users:
-        raise SubmissionError(f"Issue 作者 @{actor} 不属于队伍 {team_id}")
+    if team_id != actor:
+        raise SubmissionError("Team ID 必须是 Issue 作者的 GitHub 用户名")
 
     full_name, canonical_url = normalize_repository_url(fields["repository"])
     owner = full_name.split("/", 1)[0].lower()
-    if owner not in allowed_users:
-        raise SubmissionError(f"fork 所有者 @{owner} 不属于队伍 {team_id}")
+    if owner != actor:
+        raise SubmissionError("fork 所有者必须与 Issue 作者是同一个 GitHub 账号")
     try:
         repository = client.json("GET", api_path(full_name, ""))
     except GitHubAPIError as exc:
@@ -178,12 +173,11 @@ def reject_issue(client: GitHubClient, config: dict[str, Any], issue_number: int
 
 def validate_command(args: argparse.Namespace) -> int:
     config = load_json(Path(args.config))
-    teams = load_json(Path(args.teams))
     event = load_json(Path(args.event))
     issue_number = int(event.get("issue", {}).get("number", 0))
     client = GitHubClient(os.environ["GH_TOKEN"])
     try:
-        metadata = validate_issue(event, config, teams, client, Path(args.archive))
+        metadata = validate_issue(event, config, client, Path(args.archive))
     except SubmissionError as exc:
         reject_issue(client, config, issue_number, str(exc))
         append_output(args.github_output, eligible="false")
@@ -240,7 +234,6 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--metadata", required=True)
     validate.add_argument("--github-output")
     validate.add_argument("--config", default=str(CONFIG))
-    validate.add_argument("--teams", default=str(TEAMS))
     validate.set_defaults(function=validate_command)
     finalize = subparsers.add_parser("finalize")
     finalize.add_argument("--metadata", required=True)

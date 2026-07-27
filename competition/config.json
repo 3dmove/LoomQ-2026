@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "upstream": "QAIDAO/LoomQ-2026",
+  "team_identity": "github_issue_author",
   "deadline": "2026-08-25T04:00:00Z",
   "deadline_display": "2026-08-25 12:00 UTC+8",
   "submission_path": "starter-kit",

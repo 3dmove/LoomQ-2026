@@ -9,12 +9,12 @@ import json
 try:
     import pyqpanda as pq
 except ImportError:
-    # 允许没有安装 pyqpanda 时仅做语法和结构提示
     pq = None
+
 
 def run_on_originq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     if pq is None:
-        print("[Warning] 未检测到 pyqpanda 模块，无法真正运行本源量子示例。将返回 Mock 数据。")
+        print("[Warning] 未检测到 pyqpanda 模块，将返回 Mock 数据。")
         return {
             "backend": "originq_cpu_simulator_mock",
             "job_id": "mock-job-123",
@@ -25,46 +25,41 @@ def run_on_originq_simulator(qasm_str: str, shots: int = 1024) -> dict:
             "meta": {"info": "Mock data since pyqpanda is not installed"}
         }
 
-    # 1. 初始化量子虚拟机器 (QVM)
     machine = pq.CPUQVM()
     machine.init_qvm()
 
-    # 2. 转换 QASM 2.0 字符串为 pyqpanda 内部的 QProg (量子程序)
-    # pyqpanda 支持通过 convert_qasm_to_qprog 或 convert_qasm_string_to_qprog 导入 QASM
     try:
-        # 兼容不同版本 pyqpanda 接口
         if hasattr(pq, 'convert_qasm_string_to_qprog'):
             prog, qreg, creg = pq.convert_qasm_string_to_qprog(qasm_str, machine)
         else:
             prog = pq.convert_qasm_to_qprog(qasm_str, machine)
-            # 如果接口只返回 prog，需要从机器获取比特列表
             qreg = machine.get_allocate_qubits()
             creg = machine.get_allocate_cbits()
     except Exception as e:
-        raise RuntimeError(f"QASM 转译失败，请检查语法兼容性: {e}")
+        machine.finalize()
+        raise RuntimeError(f"QASM 转译失败: {e}")
 
-    # 3. 运行线路
-    # 使用 run_with_configuration 进行多次测量采样 (shots)
-    result = machine.run_with_configuration(prog, creg, shots)
-    
-    # 4. 统计结果
-    # pyqpanda 返回的 counts 是以十进制或二进制字符串作为 key
-    # 我们确保将其标准化为二进制 key，如 "00", "11"
-    raw_counts = result
-    formatted_counts = {}
-    
-    # 获取比特总数，以便将十进制格式化为对应长度的二进制串
-    num_bits = len(creg)
-    for key, val in raw_counts.items():
-        # 如果 key 本身是十进制整数，转为二进制字符串
-        if isinstance(key, int) or key.isdigit():
-            bin_str = bin(int(key))[2:].zfill(num_bits)
-            formatted_counts[bin_str] = val
-        else:
-            formatted_counts[key] = val
-
-    # 5. 释放量子虚拟机器资源
+    raw_counts = machine.run_with_configuration(prog, creg, shots)
     machine.finalize()
+
+    num_bits = len(creg)
+    formatted_counts = {}
+    for key, val in raw_counts.items():
+        if isinstance(key, str) and set(key).issubset({'0', '1'}):
+            bin_str = key.zfill(num_bits) if len(key) < num_bits else key[-num_bits:]
+        elif isinstance(key, int):
+            bin_str = format(key, f'0{num_bits}b')
+        elif isinstance(key, str) and key.isdigit():
+            bin_str = format(int(key), f'0{num_bits}b')
+        else:
+            bin_str = str(key)
+        formatted_counts[bin_str] = val
+
+    depth = 0
+    for line in qasm_str.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//', 'measure')):
+            depth += 1
 
     return {
         "backend": "originq_cpu_simulator",
@@ -72,12 +67,13 @@ def run_on_originq_simulator(qasm_str: str, shots: int = 1024) -> dict:
         "shots": shots,
         "counts": formatted_counts,
         "bit_order": "little",
-        "timestamp": "2026-07-06T10:00:00Z",
+        "timestamp": "2026-07-06T10:00:00Z",  # 可改为动态
         "meta": {
             "qubits_count": num_bits,
-            "depth": "N/A (Local Simulator)"
+            "depth": depth
         }
     }
+
 
 def main():
     qasm_str = """
@@ -97,6 +93,7 @@ def main():
     res = run_on_originq_simulator(qasm_str, shots=1024)
     print("\n运行并标准化后的统一输出结果:")
     print(json.dumps(res, indent=2))
+
 
 if __name__ == "__main__":
     main()

@@ -44,7 +44,7 @@ def main():
     
     print("\n运行成功！原始 Counts 结果:")
     print(counts)
-    
+    timestamp = getattr(task.metadata, 'createdAt', "2026-07-06T10:00:00Z")
     # 6. 转化为大赛规定的统一 JSON 输出格式
     unified_result = {
         "backend": "aws_local_simulator",
@@ -52,7 +52,8 @@ def main():
         "shots": shots,
         "counts": dict(counts),
         "bit_order": "little",
-        "timestamp": result.additional_metadata.action.startTime if hasattr(result, 'additional_metadata') else "2026-07-06T10:00:00Z",
+        #"timestamp": result.additional_metadata.action.startTime if hasattr(result, 'additional_metadata') else "2026-07-06T10:00:00Z",
+        "timestamp": timestamp,
         "meta": {
             "qubits_count": 2,
             "depth": len(result.measured_qubits)

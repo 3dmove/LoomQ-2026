@@ -190,7 +190,7 @@ def declared_levels() -> List[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="LoomQ public contract self-check")
-    parser.add_argument("--target", default="spinq,originq")
+    parser.add_argument("--target", default="braket,originq")
     parser.add_argument("--shots", type=int, default=8192)
     parser.add_argument("--level", choices=("declared", "all", "l1", "l2", "l3"), default="declared")
     parser.add_argument("--json-out", help="write a machine-readable report")

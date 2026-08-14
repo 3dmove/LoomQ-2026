@@ -161,10 +161,44 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")
 
+SYSTEM_PROMPT = """你是一个量子电路生成助手。你的任务是根据用户的自然语言描述，生成对应的 OpenQASM 2.0 电路代码。
 
+要求：
+- 只输出纯 QASM 代码，不包含任何解释、注释（除了 QASM 注释）或 Markdown 代码块标记。
+- 代码必须以 'OPENQASM 2.0;' 开头，包含必要的 qreg/creg 声明。
+- 使用标准 qelib1.inc 门（如 h, cx, x, y, z, s, t, u1, u2, u3, rx, ry, rz, ccx, swap, cu1 等）。
+- 测量语句使用 'measure q -> c;' 或逐个测量。
+- 代码必须语法正确且逻辑符合用户意图。
+
+示例输入: "生成一个 2 比特贝尔态"
+示例输出:
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+creg c[2];
+h q[0];
+cx q[0], q[1];
+measure q -> c;
+"""
 def agent_chat(prompt: str) -> str:
-    raise NotImplementedError("L2 not implemented")
+    # 1. 直接使用官方 helper
+    from llm_client import chat_completion
+    
+    # 2. 构建消息（这是唯一需要你自己设计 prompt 的地方）
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt}
+    ]
+    
+    # 3. 调用 API（注意：这里没有任何硬编码配置）
+    response = chat_completion(messages)
+    
+    # 4. 提取并返回文本
+    return response["choices"][0]["message"]["content"]
+    #raise NotImplementedError("L2 not implemented")
 
 
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
+
+print(agent_chat("请提供openqasm 2.0的ghz3量子电路，输出为openqasm 2.0格式，不要出现其他任何解释和说明。"))

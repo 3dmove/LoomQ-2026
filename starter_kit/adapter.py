@@ -1,16 +1,58 @@
 #!/usr/bin/env python3
-"""LoomQ adapter supporting Braket (braket) and OriginQ (originq)."""
+"""LoomQ adapter supporting Braket (braket), OriginQ (originq), and SpinQ (spinq)."""
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-SUPPORTED_TARGETS = ("braket", "originq")
+SUPPORTED_TARGETS = ("braket", "originq", "spinq")
+
+
+# ==================== 通用门分解（照抄 gate_identities.md） ====================
+def _expand_ccx(match):
+    """展开 ccx 为 15 个门的序列（速查表第5条）"""
+    parts = [p.strip() for p in match.group(1).split(',')]
+    if len(parts) != 3:
+        return match.group(0)
+    a, b, c = parts[0], parts[1], parts[2]
+    return (f"h {c}; cx {b}, {c}; tdg {c}; cx {a}, {c}; t {c}; cx {b}, {c}; tdg {c}; "
+            f"cx {a}, {c}; t {b}; t {c}; h {c}; cx {a}, {b}; t {a}; tdg {b}; cx {a}, {b};")
+
+def _expand_swap(match):
+    """展开 swap 为 3 个 cx（速查表第3条）"""
+    parts = [p.strip() for p in match.group(1).split(',')]
+    if len(parts) != 2:
+        return match.group(0)
+    a, b = parts[0], parts[1]
+    return f"cx {a}, {b}; cx {b}, {a}; cx {a}, {b};"
+
+def _apply_gate_decomposition(qasm: str) -> str:
+    """对 QASM 字符串应用所有门分解（降级为 h, cx, u1, rz, ry, measure）"""
+    # 1. ccx → 15门序列
+    qasm = re.sub(r'ccx\s*\(([^;]+)\);', _expand_ccx, qasm)
+    # 2. swap → 3 cx
+    qasm = re.sub(r'swap\s*\(([^;]+)\);', _expand_swap, qasm)
+    # 3. 相位门家族 → u1(θ)
+    qasm = re.sub(r'z\s*\(([^;]+)\);', r'u1(pi) \1;', qasm)
+    qasm = re.sub(r's\s*\(([^;]+)\);', r'u1(pi/2) \1;', qasm)
+    qasm = re.sub(r'sdg\s*\(([^;]+)\);', r'u1(-pi/2) \1;', qasm)
+    qasm = re.sub(r't\s*\(([^;]+)\);', r'u1(pi/4) \1;', qasm)
+    qasm = re.sub(r'tdg\s*\(([^;]+)\);', r'u1(-pi/4) \1;', qasm)
+    # 注：rz, ry, h, x, cx, cu1 保持不变，它们被所有后端支持（或后续转换）
+    return qasm
 
 
 def transpile(qasm_str: str, target: str) -> str:
-    """Convert OpenQASM 2.0 to target's native format if needed."""
+    """Convert OpenQASM 2.0 to target's native format."""
+    # ----- 第一步：通用门分解（所有后端都执行） -----
+    qasm_str = _apply_gate_decomposition(qasm_str)
+
+    # ----- 第二步：平台特定转换 -----
     if target == "braket":
-        # Braket needs QASM 3.0; convert 2.0 syntax
+        # Braket 要求 QASM 3.0 语法，并将 u1/cu1 转换为 phaseshift/cphaseshift
+        qasm_str = re.sub(r'u1\(([^)]+)\)', r'phaseshift(\1)', qasm_str)
+        qasm_str = re.sub(r'cu1\(([^)]+)\)', r'cphaseshift(\1)', qasm_str)
+
+        # 转换 QASM 2.0 声明为 QASM 3.0
         lines = qasm_str.splitlines()
         new_lines = []
         for line in lines:
@@ -32,7 +74,6 @@ def transpile(qasm_str: str, target: str) -> str:
                     name, size = m.groups()
                     new_lines.append(f"bit[{size}] {name};")
                     continue
-            # Convert measure q -> c; to c = measure q;
             if "measure" in stripped:
                 m = re.match(r'^\s*measure\s+(\w+)\s*->\s*(\w+)\s*;', stripped)
                 if m:
@@ -42,16 +83,19 @@ def transpile(qasm_str: str, target: str) -> str:
                 m = re.match(r'^\s*measure\s+(\w+)\s*;', stripped)
                 if m:
                     q = m.group(1)
-                    # Use 'c' as default creg if not defined, but better to keep original
                     new_lines.append(f"c = measure {q};")
                     continue
-            # Replace cx with cnot
+            # cx → cnot (Braket 标准)
             line = re.sub(r'\bcx\b', 'cnot', line)
             new_lines.append(line)
         return "\n".join(new_lines)
 
     if target == "originq":
-        # pyqpanda accepts QASM 2.0 directly, no conversion needed
+        # pyqpanda 原生支持 u1, cu1, cx, ry, rz，直接返回分解后的 QASM 2.0
+        return qasm_str
+
+    if target == "spinq":
+        # SpinQ 也原生支持 u1, cu1 等，直接返回分解后的 QASM 2.0
         return qasm_str
 
     raise NotImplementedError(f"Transpile for target '{target}' not implemented")
@@ -59,6 +103,9 @@ def transpile(qasm_str: str, target: str) -> str:
 
 def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
     """Execute circuit on target backend and return unified result."""
+    # 先进行门分解（保证后端收到的都是基础门）
+    qasm_str = _apply_gate_decomposition(qasm_str)
+
     if target == "braket":
         from braket.devices import LocalSimulator
         from braket.ir.openqasm import Program
@@ -78,14 +125,12 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
         if timestamp is None:
             timestamp = datetime.now(timezone.utc).isoformat() + "Z"
 
-        # Determine qubit count from counts keys
         if counts:
             num_qubits = len(next(iter(counts.keys())))
         else:
             m = re.search(r'qubit\[(\d+)\]', qasm3)
             num_qubits = int(m.group(1)) if m else 2
 
-        # Estimate depth (non-declaration, non-comment lines)
         depth = 0
         for line in qasm3.splitlines():
             stripped = line.strip()
@@ -112,7 +157,6 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
         machine.init_qvm()
 
         try:
-            # Try new API first
             if hasattr(pq, 'convert_qasm_string_to_qprog'):
                 prog, qreg, creg = pq.convert_qasm_string_to_qprog(qasm_str, machine)
             else:
@@ -123,16 +167,13 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
             machine.finalize()
             raise RuntimeError(f"QASM conversion failed: {e}")
 
-        # Execute
         raw_counts = machine.run_with_configuration(prog, creg, shots)
         machine.finalize()
 
         num_bits = len(creg)
-        # Format counts: ensure binary string keys with correct length
         formatted_counts = {}
         for key, val in raw_counts.items():
             if isinstance(key, str) and set(key).issubset({'0', '1'}):
-                # Already binary string, pad/truncate to num_bits
                 bin_str = key.zfill(num_bits) if len(key) < num_bits else key[-num_bits:]
             elif isinstance(key, int):
                 bin_str = format(key, f'0{num_bits}b')
@@ -142,11 +183,10 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
                 bin_str = str(key)
             formatted_counts[bin_str] = val
 
-        # Depth estimation
         depth = 0
         for line in qasm_str.splitlines():
             stripped = line.strip()
-            if (stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//', 'measure'))):
+            if stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//', 'measure')):
                 depth += 1
 
         return {
@@ -157,6 +197,35 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
             "bit_order": "little",
             "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "meta": {"qubits_count": num_bits, "depth": depth}
+        }
+
+    if target == "spinq":
+        from spinqit import QuantumCircuit, TaurusLocalSimulator
+
+        qc = QuantumCircuit.from_qasm(qasm_str)
+        sim = TaurusLocalSimulator()
+        result = sim.run(qc, shots=shots)
+        raw_counts = result.get_counts()
+
+        # 位序归一化：SpinQ 返回的 key 是 big-endian（c[0]在左），需要反转成 little（c[0]在右）
+        normalized_counts = {}
+        for key, val in raw_counts.items():
+            normalized_counts[key[::-1]] = val
+
+        depth = 0
+        for line in qasm_str.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//')):
+                depth += 1
+
+        return {
+            "backend": "spinq_taurus_simulator",
+            "job_id": "spinq-local-job",
+            "shots": shots,
+            "counts": normalized_counts,
+            "bit_order": "little",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+            "meta": {"qubits_count": qc.qubit_count, "depth": depth}
         }
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")

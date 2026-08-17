@@ -237,6 +237,7 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")
 
+
 SYSTEM_PROMPT = """
 你是一个专业的量子电路生成助手。你要识别是下面三个任务中的哪一个：
 任务一：根据用户的自然语言描述，生成对应的、语法正确的 OpenQASM 2.0 电路代码。
@@ -336,67 +337,154 @@ measure q -> c;
 
 任务三：如果用户要求你推荐量子模拟器后端，输出“Hello”
 """
-def agent_chat(prompt: str) -> str:
-    from llm_client import chat_completion
-    
-    SYSTEM_PROMPT = (
-        "You are a quantum computing assistant. "
-        "Output only valid OpenQASM 2.0 code, with no extra explanation. "
-        "Use only gates from the allowed set: h, x, s, sdg, t, tdg, rz, ry, cx, cu1, swap, ccx. "
-        "Make sure your code includes qreg and creg declarations, and ends with measure."
-    )
-    
-    def ask_llm(user_prompt: str) -> str:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ]
-        response = chat_completion(messages)
-        return response["choices"][0]["message"]["content"]
-    
-    max_attempts = 3
-    last_qasm = ""
-    last_error = ""
-    
-    for attempt in range(max_attempts):
-        if attempt == 0:
-            user_msg = prompt
-        else:
-            user_msg = f"{prompt}\n\n上一版代码有错误，请修正：\n{last_error}"
-        
-        qasm = ask_llm(user_msg)
-        last_qasm = qasm
-        
-        # 2. 尝试用 run() 执行验证
+# ==================== L2 智能体 ====================
+import json
+import os
+
+def _load_backend_data():
+    """从 backend_capabilities.json 加载后端列表，返回 (列表, ID集合)"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend_capabilities.json")
     try:
-        from starter_kit.adapter import run
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        backends = data.get("backends", [])
+        ids = {b["id"] for b in backends}
+        return backends, ids
+    except:
+        return [], set()
+
+_BACKENDS, _VALID_IDS = _load_backend_data()
+
+def _build_system_prompt():
+    """动态生成系统提示，包含后端能力表"""
+    if _BACKENDS:
+        summary = "\n".join(
+            f"- {b['id']}: {b['kind']}, max_qubits={b['max_qubits']}, queue={b['queue']}, cost={b['cost']}"
+            for b in _BACKENDS
+        )
+    else:
+        summary = "（暂无后端数据，请按常识推荐）"
+
+    return f"""你是一个量子计算助手。根据用户输入自行判断意图，并按格式输出：
+
+- 若用户要生成或修正电路：输出纯 OpenQASM 2.0 代码（以 OPENQASM 2.0; 开头，含 qreg/creg/measure）。
+- 若用户要推荐后端：根据以下能力表，只输出一个后端ID，不加解释：
+{summary}
+
+绝对不要包含 Markdown 代码块或额外文字。"""
+
+def _extract_qasm(text: str) -> str:
+    """从文本中提取 OpenQASM 2.0 代码块"""
+    if not isinstance(text, str):
+        return ""
+    # 匹配从 OPENQASM 2.0 开始，直到遇见 ``` 或结尾
+    match = re.search(r"(OPENQASM\s+2\.0;.*?)(?=\s*```|\Z)", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    # 若没有，尝试找包含 qreg 和 creg 的段落
+    match = re.search(r"(qreg\s+.*?;\s*creg\s+.*?;.*?measure.*?;)", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+def _extract_backend(text: str) -> str:
+    """从文本中提取已知后端标识符（基于 _VALID_IDS）"""
+    if not isinstance(text, str) or not _VALID_IDS:
+        return ""
+    import re
+    for ident in _VALID_IDS:
+        if re.search(re.escape(ident), text, re.IGNORECASE):
+            return ident
+    # 兜底：分词匹配
+    words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", text)
+    for w in words:
+        if w.lower() in {v.lower() for v in _VALID_IDS}:
+            return w
+    return ""
+
+def _verify_qasm(qasm: str) -> bool:
+    """用 run 执行 QASM（braket 本地模拟器），验证是否能正常跑通"""
+    try:
         result = run(qasm, "braket", 1024)
+        if not isinstance(result, dict) or "counts" not in result:
+            return False
+        total = sum(result["counts"].values())
+        return total == 1024
+    except Exception:
+        return False
 
-        counts = result.get("counts", {})
-        total_shots = sum(counts.values()) if counts else 0
+def agent_chat(user_prompt: str) -> str:
+    """L2 智能体入口：LLM 自主判断意图，动态提示包含后端能力表"""
+    from llm_client import chat_completion
 
-        if counts and total_shots == 1024:
-            # 成功！返回 AI 生成的 QASM
+    system_prompt = _build_system_prompt()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    last_output = ""
+    # 最多尝试 2 次（初次 + 1 次重试）
+    for attempt in range(2):
+        try:
+            response = chat_completion(messages)
+            output = response["choices"][0]["message"]["content"].strip()
+            last_output = output
+        except Exception as e:
+            last_output = f"LLM error: {e}"
+            break
+
+        # 尝试提取 QASM 并验证
+        qasm = _extract_qasm(output)
+        if qasm and _verify_qasm(qasm):
             return qasm
-        else:
-            last_error = f"电路执行结果异常：counts={counts}, total_shots={total_shots}"
-    except Exception as e:
-        last_error = str(e)
-        # 继续下一轮重试
 
-    return last_qasm
+        # 尝试提取后端标识
+        backend = _extract_backend(output)
+        if backend:
+            return backend
+
+        # 如果都无效，且还有重试机会，则反馈格式错误
+        if attempt == 0:
+            messages.append({"role": "assistant", "content": output})
+            messages.append({
+                "role": "user",
+                "content": "输出格式不正确。请只输出纯 QASM 代码或有效的后端 ID，不要添加任何额外文字。"
+            })
+
+    # 最后一次尝试：尽量提取
+    qasm = _extract_qasm(last_output)
+    if qasm:
+        return qasm
+    backend = _extract_backend(last_output)
+    if backend:
+        return backend
+    return last_output  # 实在无法提取则原样返回
 
 
+# ==================== L3 占位 ====================
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
 
-qasm = agent_chat('''修改以下量子电路OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[2];
-creg cx[2];
-h q[0];
-cx q[0], q[1];
-measure q -> c;''')
-print(qasm)
-#run_result = run(qasm, target="braket", shots=1024)
-#print(run_result)
+
+# ==================== 交互入口（可选） ====================
+if __name__ == "__main__":
+    import sys
+    print("LoomQ Agent 交互模式 (输入 'exit' 退出)")
+    while True:
+        try:
+            user_input = input("> ")
+        except EOFError:
+            break
+        if user_input.lower() in ("exit", "quit"):
+            break
+        if not user_input.strip():
+            continue
+        try:
+            reply = agent_chat(user_input)
+            print(reply)
+            print("---")
+        except Exception as e:
+            print(f"错误: {e}")
+
+

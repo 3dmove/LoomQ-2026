@@ -206,32 +206,55 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
         }
 
     if target == "spinq":
-        from spinqit import QuantumCircuit, TaurusLocalSimulator
+        from spinqit.compiler.qasm_compiler import QASMCompiler
+        from spinqit import BasicSimulatorBackend, BasicSimulatorConfig
+        import tempfile
+        import os
 
-        qc = QuantumCircuit.from_qasm(qasm_str)
-        sim = TaurusLocalSimulator()
-        result = sim.run(qc, shots=shots)
-        raw_counts = result.get_counts()
+        # 将 QASM 字符串写入临时文件（QASMCompiler.compile 接受文件路径）
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.qasm', delete=False) as f:
+            f.write(qasm_str)
+            path = f.name
 
-        # 位序归一化：SpinQ 返回的 key 是 big-endian（c[0]在左），需要反转成 little（c[0]在右）
-        normalized_counts = {}
-        for key, val in raw_counts.items():
-            normalized_counts[key[::-1]] = val
+        try:
+            compiler = QASMCompiler()
+            ir = compiler.compile(path, level=0)
+            config = BasicSimulatorConfig()
+            config.configure_shots(shots)
+            backend = BasicSimulatorBackend()
+            result = backend.execute(ir, config)
+            raw_counts = result.counts
+        finally:
+            os.unlink(path)
 
+        # 位序归一化：SpinQ 返回的 counts 已经是 little-endian（c[0]在右），直接使用
+        normalized_counts = raw_counts
+
+        # 计算深度（粗略估计）
         depth = 0
         for line in qasm_str.splitlines():
             stripped = line.strip()
             if stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//')):
                 depth += 1
 
+        # 估算 qubit 数量
+        qubit_count = 0
+        for line in qasm_str.splitlines():
+            if 'qreg' in line:
+                import re
+                m = re.search(r'qreg\s+\w+\[(\d+)\]', line)
+                if m:
+                    qubit_count = int(m.group(1))
+                    break
+
         return {
-            "backend": "spinq_taurus_simulator",
+            "backend": "spinq_basic_simulator",
             "job_id": "spinq-local-job",
             "shots": shots,
             "counts": normalized_counts,
             "bit_order": "little",
             "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-            "meta": {"qubits_count": qc.qubit_count, "depth": depth}
+            "meta": {"qubits_count": qubit_count, "depth": depth}
         }
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")

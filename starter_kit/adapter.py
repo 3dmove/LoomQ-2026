@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """LoomQ adapter supporting Braket (braket), OriginQ (originq), and SpinQ (spinq)."""
 import re
 from datetime import datetime, timezone
@@ -331,8 +332,7 @@ measure q -> c;
 """
 def agent_chat(prompt: str) -> str:
     # 1. 直接使用官方 helper
-    from llm_client import chat_completion
-    
+    from .llm_client import chat_completion    
     # 2. 构建消息（这是唯一需要你自己设计 prompt 的地方）
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

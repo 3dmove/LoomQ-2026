@@ -360,12 +360,23 @@ def agent_chat(prompt: str) -> str:
         qasm = ask_llm(user_msg)
         last_qasm = qasm
         
-        # 简单检查：是否包含 OPENQASM 和 qreg
-        if "OPENQASM" in qasm and "qreg" in qasm:
+        # 2. 尝试用 run() 执行验证
+    try:
+        from starter_kit.adapter import run
+        result = run(qasm, "braket", 1024)
+
+        counts = result.get("counts", {})
+        total_shots = sum(counts.values()) if counts else 0
+
+        if counts and total_shots == 1024:
+            # 成功！返回 AI 生成的 QASM
             return qasm
         else:
-            last_error = "生成的代码缺少 OPENQASM 或 qreg 声明"
-    
+            last_error = f"电路执行结果异常：counts={counts}, total_shots={total_shots}"
+    except Exception as e:
+        last_error = str(e)
+        # 继续下一轮重试
+
     return last_qasm
 
 

@@ -26,18 +26,24 @@ def _expand_swap(match):
     return f"cx {a}, {b}; cx {b}, {a}; cx {a}, {b};"
 
 def _apply_gate_decomposition(qasm: str) -> str:
-    """对 QASM 字符串应用所有门分解（降级为 h, cx, u1, rz, ry, measure）"""
-    # 1. ccx → 15门序列
+    # 1. ccz → h target; ccx (ctrl1, ctrl2, target); h target;
+    qasm = re.sub(r'ccz\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;', 
+                  lambda m: f"h {m.group(3).strip()}; ccx ({m.group(1).strip()}, {m.group(2).strip()}, {m.group(3).strip()}); h {m.group(3).strip()};", qasm)
+
+    # 2. ccx → 15门序列
     qasm = re.sub(r'ccx\s*\(([^;]+)\);', _expand_ccx, qasm)
-    # 2. swap → 3 cx
-    qasm = re.sub(r'swap\s*\(([^;]+)\);', _expand_swap, qasm)
-    # 3. 相位门家族 → u1(θ)
-    qasm = re.sub(r'z\s*\(([^;]+)\);', r'u1(pi) \1;', qasm)
-    qasm = re.sub(r's\s*\(([^;]+)\);', r'u1(pi/2) \1;', qasm)
-    qasm = re.sub(r'sdg\s*\(([^;]+)\);', r'u1(-pi/2) \1;', qasm)
-    qasm = re.sub(r't\s*\(([^;]+)\);', r'u1(pi/4) \1;', qasm)
-    qasm = re.sub(r'tdg\s*\(([^;]+)\);', r'u1(-pi/4) \1;', qasm)
-    # 注：rz, ry, h, x, cx, cu1 保持不变，它们被所有后端支持（或后续转换）
+
+    # 3. swap → 3 cx
+    qasm = re.sub(r'swap\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;', 
+                  lambda m: f"cx {m.group(1).strip()}, {m.group(2).strip()}; cx {m.group(2).strip()}, {m.group(1).strip()}; cx {m.group(1).strip()}, {m.group(2).strip()};", qasm)
+
+    # 4. 相位门 → u1(θ)（注意顺序：先长后短，避免 tdg → t + dg 误匹配）
+    qasm = re.sub(r'\btdg\s*([^;]+);', r'u1(-pi/4) \1;', qasm)
+    qasm = re.sub(r'\bsdg\s*([^;]+);', r'u1(-pi/2) \1;', qasm)
+    qasm = re.sub(r'\bt\s*([^;]+);', r'u1(pi/4) \1;', qasm)
+    qasm = re.sub(r'\bs\s*([^;]+);', r'u1(pi/2) \1;', qasm)
+    qasm = re.sub(r'\bz\s*([^;]+);', r'u1(pi) \1;', qasm)
+
     return qasm
 
 

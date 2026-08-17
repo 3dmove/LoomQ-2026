@@ -187,7 +187,6 @@ def declared_levels() -> List[str]:
         if re.search(r"^\s*%s:\s*true\s*$" % name, text, re.MULTILINE | re.IGNORECASE)
     ]
 
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="LoomQ public contract self-check")
     parser.add_argument("--target", default="braket,originq")

@@ -330,33 +330,55 @@ measure q -> c;
 任务三：如果用户要求你推荐量子模拟器后端，输出“Hello”
 """
 def agent_chat(prompt: str) -> str:
-    # 1. 直接使用官方 helper
     from llm_client import chat_completion
     
-    # 2. 构建消息（这是唯一需要你自己设计 prompt 的地方）
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt}
-    ]
+    SYSTEM_PROMPT = (
+        "You are a quantum computing assistant. "
+        "Output only valid OpenQASM 2.0 code, with no extra explanation. "
+        "Use only gates from the allowed set: h, x, s, sdg, t, tdg, rz, ry, cx, cu1, swap, ccx. "
+        "Make sure your code includes qreg and creg declarations, and ends with measure."
+    )
     
-    # 3. 调用 API（注意：这里没有任何硬编码配置）
-    response = chat_completion(messages)
+    def ask_llm(user_prompt: str) -> str:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ]
+        response = chat_completion(messages)
+        return response["choices"][0]["message"]["content"]
     
-    # 4. 提取并返回文本
-    return response["choices"][0]["message"]["content"]
-    #raise NotImplementedError("L2 not implemented")
+    max_attempts = 3
+    last_qasm = ""
+    last_error = ""
+    
+    for attempt in range(max_attempts):
+        if attempt == 0:
+            user_msg = prompt
+        else:
+            user_msg = f"{prompt}\n\n上一版代码有错误，请修正：\n{last_error}"
+        
+        qasm = ask_llm(user_msg)
+        last_qasm = qasm
+        
+        # 简单检查：是否包含 OPENQASM 和 qreg
+        if "OPENQASM" in qasm and "qreg" in qasm:
+            return qasm
+        else:
+            last_error = "生成的代码缺少 OPENQASM 或 qreg 声明"
+    
+    return last_qasm
 
 
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
 
-qasm = agent_chat('''修改以下量子电路OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[2];
-creg cx[2];
-h q[0];
-cx q[0], q[1];
-measure q -> c;''')
-print(qasm)
+# qasm = agent_chat('''修改以下量子电路OPENQASM 2.0;
+# include "qelib1.inc";
+# qreg q[2];
+#creg cx[2];
+#h q[0];
+#cx q[0], q[1];
+#measure q -> c;''')
+# print(qasm)
 #run_result = run(qasm, target="braket", shots=1024)
 #print(run_result)

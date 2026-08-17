@@ -212,7 +212,6 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
         import tempfile
         import os
 
-        # 将 QASM 字符串写入临时文件（QASMCompiler.compile 接受文件路径）
         with tempfile.NamedTemporaryFile(mode='w', suffix='.qasm', delete=False) as f:
             f.write(qasm_str)
             path = f.name
@@ -228,17 +227,14 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
         finally:
             os.unlink(path)
 
-        # 位序归一化：SpinQ 返回的 counts 已经是 little-endian（c[0]在右），直接使用
         normalized_counts = raw_counts
 
-        # 计算深度（粗略估计）
         depth = 0
         for line in qasm_str.splitlines():
             stripped = line.strip()
             if stripped and not stripped.startswith(('OPENQASM', 'qreg', 'creg', 'include', '//')):
                 depth += 1
 
-        # 估算 qubit 数量
         qubit_count = 0
         for line in qasm_str.splitlines():
             if 'qreg' in line:
@@ -249,13 +245,13 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
                     break
 
         return {
-            "backend": "spinq_basic_simulator",
-            "job_id": "spinq-local-job",
-            "shots": shots,
-            "counts": normalized_counts,
-            "bit_order": "little",
-            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-            "meta": {"qubits_count": qubit_count, "depth": depth}
+        "backend": "spinq_basic_simulator",
+        "job_id": "spinq-local-job",
+        "shots": shots,
+        "counts": normalized_counts,
+        "bit_order": "little",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+        "meta": {"qubits_count": qubit_count, "depth": depth}
         }
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")
@@ -412,7 +408,7 @@ def agent_chat(prompt: str) -> str:
 
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
-
+"""
 qasm = agent_chat('''修改以下量子电路OPENQASM 2.0;
 include "qelib1.inc";
 qreg q[2];
@@ -423,3 +419,4 @@ measure q -> c;''')
 print(qasm)
 #run_result = run(qasm, target="braket", shots=1024)
 #print(run_result)
+"""

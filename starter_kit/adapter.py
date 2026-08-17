@@ -350,13 +350,7 @@ def agent_chat(prompt: str) -> str:
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
 
-qasm = agent_chat('''修改以下量子电路OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[2];
-creg cx[2];
-h q[0];
-cx q[0], q[1];
-measure q -> c;''')
+qasm = agent_chat('''请给我ghz5.qasm的量子电路代码''')
 print(qasm)
-#run_result = run(qasm, target="braket", shots=1024)
-#print(run_result)
+run_result = run(qasm, target="braket", shots=1024)
+print(run_result)

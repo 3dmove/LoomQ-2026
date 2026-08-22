@@ -10,7 +10,7 @@ runtime:
   version: "3.10"
 network:
   required_for_l1: false
-  required_for_l2: false
+  required_for_l2: true
   allowed_hosts: []
 l2_runtime:
   protocol: "openai_chat_completions"

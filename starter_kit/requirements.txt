@@ -1,5 +1,6 @@
 # Public evaluator baseline: no third-party dependencies.
 # Add project dependencies below and pin every version exactly, for example:
+# python 3.9.6
 amazon-braket-sdk==1.84.0
 pyqpanda==3.8.5
 antlr4-python3-runtime==4.13.2

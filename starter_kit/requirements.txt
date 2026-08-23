@@ -1,13 +1,11 @@
 # Public evaluator baseline: no third-party dependencies.
 # Add project dependencies below and pin every version exactly, for example:
 
-# Python 3.10
-
-# For Braket + OriginQ (Python 3.10.11)
+# Braket + OriginQ: Python 3.10.11
 amazon-braket-sdk==1.84.0
 pyqpanda==3.8.5
 antlr4-python3-runtime==4.13.2
 
-# For SpinQ (Python 3.10.20)
+# SpinQ: Python 3.10.20(separate environment)
 spinqit==0.2.4
 antlr4-python3-runtime==4.9.2

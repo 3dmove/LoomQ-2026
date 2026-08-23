@@ -11,7 +11,8 @@ runtime:
 network:
   required_for_l1: false
   required_for_l2: true
-  allowed_hosts: []
+  allowed_hosts:
+    - "api.deepseek.com"
 l2_runtime:
   protocol: "openai_chat_completions"
   configuration_source: "environment"

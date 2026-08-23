@@ -5,4 +5,9 @@
 **/.DStore
 __pycache__/
 *.py[cod]
-.venv/
+
+SpinQit/
+adapter_files/
+.venv*/
+venv*/
+.vscode/

@@ -8,6 +8,54 @@ from typing import Any, Dict
 SUPPORTED_TARGETS = ("braket", "originq", "spinq")
 
 
+# ==================== 辅助函数：移除 measure（量旋云专用） ====================
+def remove_measure_statements(qasm: str) -> str:
+    """移除 QASM 代码中的所有 measure 语句（量旋云平台不需要）"""
+    lines = qasm.splitlines()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        # 跳过包含 measure 的行（无论空格、箭头格式如何）
+        if re.search(r'\bmeasure\b', stripped, re.IGNORECASE):
+            continue
+        new_lines.append(line)
+    return "\n".join(new_lines)
+
+
+# ==================== 可视化辅助函数 ====================
+def draw_circuit_ascii(qasm_str: str) -> str:
+    """使用 Qiskit 生成 ASCII 电路图"""
+    try:
+        from qiskit import QuantumCircuit
+        qc = QuantumCircuit.from_qasm_str(qasm_str)
+        return qc.draw(output='text')
+    except Exception:
+        return "（电路图生成失败，请确保已安装 qiskit）"
+
+
+def plot_counts_bar(counts: dict, title: str = "测量结果分布") -> None:
+    """使用 matplotlib 绘制柱状图并显示"""
+    if not counts:
+        print("无数据可绘图")
+        return
+    try:
+        import matplotlib.pyplot as plt
+        labels = list(counts.keys())
+        values = list(counts.values())
+        plt.figure(figsize=(8, 5))
+        plt.bar(labels, values, color='skyblue')
+        plt.xlabel("量子态")
+        plt.ylabel("计数")
+        plt.title(title)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+    except ImportError:
+        print("⚠️ matplotlib 未安装，无法显示柱状图。")
+    except Exception as e:
+        print(f"⚠️ 柱状图显示失败: {e}")
+
+
 # ==================== 通用门分解（照抄 gate_identities.md） ====================
 def _expand_ccx(match):
     """展开 ccx 为 15 个门的序列（速查表第5条）"""
@@ -18,6 +66,7 @@ def _expand_ccx(match):
     return (f"h {c}; cx {b}, {c}; tdg {c}; cx {a}, {c}; t {c}; cx {b}, {c}; tdg {c}; "
             f"cx {a}, {c}; t {b}; t {c}; h {c}; cx {a}, {b}; t {a}; tdg {b}; cx {a}, {b};")
 
+
 def _expand_swap(match):
     """展开 swap 为 3 个 cx（速查表第3条）"""
     parts = [p.strip() for p in match.group(1).split(',')]
@@ -26,16 +75,17 @@ def _expand_swap(match):
     a, b = parts[0], parts[1]
     return f"cx {a}, {b}; cx {b}, {a}; cx {a}, {b};"
 
+
 def _apply_gate_decomposition(qasm: str) -> str:
     # 1. ccz → h target; ccx (ctrl1, ctrl2, target); h target;
-    qasm = re.sub(r'ccz\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;', 
+    qasm = re.sub(r'ccz\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;',
                   lambda m: f"h {m.group(3).strip()}; ccx ({m.group(1).strip()}, {m.group(2).strip()}, {m.group(3).strip()}); h {m.group(3).strip()};", qasm)
 
     # 2. ccx → 15门序列
     qasm = re.sub(r'ccx\s*\(([^;]+)\);', _expand_ccx, qasm)
 
     # 3. swap → 3 cx
-    qasm = re.sub(r'swap\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;', 
+    qasm = re.sub(r'swap\s*\(?\s*([^,;]+)\s*,\s*([^,;]+)\s*\)?\s*;',
                   lambda m: f"cx {m.group(1).strip()}, {m.group(2).strip()}; cx {m.group(2).strip()}, {m.group(1).strip()}; cx {m.group(1).strip()}, {m.group(2).strip()};", qasm)
 
     # 4. 相位门 → u1(θ)（注意顺序：先长后短，避免 tdg → t + dg 误匹配）
@@ -206,28 +256,49 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
             "meta": {"qubits_count": num_bits, "depth": depth}
         }
 
+    # ==================== SpinQ 分支（含云后端支持） ====================
     if target == "spinq":
+        qasm_str = remove_measure_statements(qasm_str)   # 量旋云不需要 measure
+        import os
+        import tempfile
         from spinqit.compiler.qasm_compiler import QASMCompiler
         from spinqit import BasicSimulatorBackend, BasicSimulatorConfig
-        import tempfile
-        import os
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.qasm', delete=False) as f:
             f.write(qasm_str)
             path = f.name
-
         try:
             compiler = QASMCompiler()
             ir = compiler.compile(path, level=0)
             config = BasicSimulatorConfig()
             config.configure_shots(shots)
-            backend = BasicSimulatorBackend()
-            result = backend.execute(ir, config)
+
+            use_cloud = os.environ.get("SPINQ_USE_CLOUD", "false").lower() == "true"
+            if use_cloud:
+                from spinqit import get_spinq_cloud
+                username = os.environ.get("SPINQ_CLOUD_USERNAME")
+                keyfile = os.environ.get("SPINQ_CLOUD_KEYFILE", "~/.ssh/id_rsa")
+                if not username:
+                    raise RuntimeError("SPINQ_CLOUD_USERNAME must be set when using cloud backend")
+                backend = get_spinq_cloud(username=username, keyfile=keyfile)
+                config.metadata['platform'] = os.environ.get("SPINQ_PLATFORM", "Taurus")
+                result = backend.execute(ir, config)
+                job_id = getattr(result, 'job_id', 'spinq-cloud-job')
+                backend_name = "spinq_cloud"
+            else:
+                backend = BasicSimulatorBackend()
+                result = backend.execute(ir, config)
+                job_id = "spinq-local-job"
+                backend_name = "spinq_basic_simulator"
+
             raw_counts = result.counts
         finally:
             os.unlink(path)
 
-        normalized_counts = raw_counts
+        # 归一化位序
+        normalized_counts = {}
+        for key, val in raw_counts.items():
+            normalized_counts[key[::-1]] = val
 
         depth = 0
         for line in qasm_str.splitlines():
@@ -245,117 +316,18 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
                     break
 
         return {
-        "backend": "spinq_basic_simulator",
-        "job_id": "spinq-local-job",
-        "shots": shots,
-        "counts": normalized_counts,
-        "bit_order": "little",
-        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-        "meta": {"qubits_count": qubit_count, "depth": depth}
+            "backend": backend_name,
+            "job_id": job_id,
+            "shots": shots,
+            "counts": normalized_counts,
+            "bit_order": "little",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+            "meta": {"qubits_count": qubit_count, "depth": depth}
         }
 
     raise NotImplementedError(f"Run for target '{target}' not implemented")
 
 
-SYSTEM_PROMPT = """
-你是一个专业的量子电路生成助手。你要识别是下面三个任务中的哪一个：
-任务一：根据用户的自然语言描述，生成对应的、语法正确的 OpenQASM 2.0 电路代码。
-
-## 一、基础知识（快速复习）
-- 量子比特（qubit）用 q 表示，经典比特（bit）用 c 表示。
-- 电路是时间顺序的：门从左到右依次应用。
-- 测量将量子比特状态映射为经典 0/1。
-
-## 二、OpenQASM 2.0 语法规则（必须严格遵守）
-1. 程序必须以 `OPENQASM 2.0;` 开头。
-2. 第二行必须包含 `include "qelib1.inc";`（标准库定义常用门）。
-3. 声明量子寄存器：`qreg 名称[数量];`，例如 `qreg q[3];`
-4. 声明经典寄存器：`creg 名称[数量];`，例如 `creg c[3];`
-5. 所有量子门和测量语句以分号 `;` 结尾。
-6. 支持的门（不区分大小写，但必须使用小写名称）：
-   - 单比特门：`h`, `x`, `s`, `sdg`, `t`, `tdg`, `ry(theta)`, `rz(theta)`
-   - 两比特门：`cx`（CNOT，控制-目标）, `swap`, `cu1(lambda)`（受控相位）
-   - 三比特门：`ccx`（Toffoli）
-   - 测量：`measure 量子寄存器 -> 经典寄存器;` 或逐个测量 `measure q[i] -> c[i];`
-7. 测量应放在所有门操作之后。
-8. 寄存器大小必须足够容纳所操作的索引（例如有 `q[3]` 才能用 `q[2]`）。
-9. 代码中不要包含任何注释（除了 QASM 注释 `//`）或额外解释文字。
-10. 代码中只能用第6点列出的门，不能使用其他自定义门或库。
-
-## 三、完整电路示例（请参考这些模板）
-
-### 示例1：贝尔态（2 比特）
-输入: "生成一个 2 比特贝尔态"
-输出:
-OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[2];
-creg c[2];
-h q[0];
-cx q[0], q[1];
-measure q -> c;
-
-### 示例2：3 比特 GHZ 态
-输入: "生成一个 3 比特 GHZ 态并全测量"
-输出:
-OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[3];
-creg c[3];
-h q[0];
-cx q[0], q[1];
-cx q[1], q[2];
-measure q -> c;
-
-### 示例3：交换两个量子比特
-输入: "交换 q[0] 和 q[2]"
-输出:
-OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[3];
-creg c[3];
-swap q[0], q[2];
-measure q -> c;
-
-### 示例4：带旋转门的电路
-输入: "对 q[0] 做 Rx(pi/2)，然后与 q[1] 做 CNOT"
-输出:
-OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[2];
-creg c[2];
-rx(pi/2) q[0];
-cx q[0], q[1];
-measure q -> c;
-
-### 示例5：5 比特 GHZ 态
-输入: "生成 5 比特 GHZ 态"
-输出:
-OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[5];
-creg c[5];
-h q[0];
-cx q[0], q[1];
-cx q[1], q[2];
-cx q[2], q[3];
-cx q[3], q[4];
-measure q -> c;
-
-## 四、输出格式要求（极其重要）
-- 只输出纯 QASM 代码，**不要**包含任何解释、注释（除了 QASM 标准注释 `//`）或 Markdown 代码块（如 ```qasm）。
-- 代码必须从 `OPENQASM 2.0;` 开始，到最后一个 `measure` 语句结束。
-- 如果用户描述不够明确（如未指定比特数），请根据常见含义合理推断（例如 GHZ 通常为 3 比特，贝尔态为 2 比特），并在输出前不作任何说明。
-- 如果用户要求包含特定门，请确保使用正确的语法（如 `ry(theta)` 中的 theta 用 `pi/2` 或 `3.14159` 表示）。
-- 检查输出的结果，如果发现用了不支持的门或语法错误，请重新生成，确保完全符合 OpenQASM 2.0 规范。
-
-现在，请根据用户的请求生成对应的 QASM 代码。
-
-任务二：如果用户要求你修改量子电路，请在用户给的 QASM 代码中直接进行修改，确保输出仍然符合 OpenQASM 2.0 规范（参考任务一的规范），
-输出格式为“以下为修改后的正确代码”+纯 QASM 代码 或者 “未找到可修改的代码” 或者 “代码正确”。
-
-任务三：如果用户要求你推荐量子模拟器后端，输出“Hello”
-"""
 # ==================== L2 智能体 ====================
 import json
 import os
@@ -398,25 +370,21 @@ def _extract_qasm(text: str) -> str:
     """从文本中提取 OpenQASM 2.0 代码块"""
     if not isinstance(text, str):
         return ""
-    # 匹配从 OPENQASM 2.0 开始，直到遇见 ``` 或结尾
     match = re.search(r"(OPENQASM\s+2\.0;.*?)(?=\s*```|\Z)", text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
-    # 若没有，尝试找包含 qreg 和 creg 的段落
     match = re.search(r"(qreg\s+.*?;\s*creg\s+.*?;.*?measure.*?;)", text, re.DOTALL)
     if match:
         return match.group(1).strip()
     return ""
 
 def _extract_backend(text: str) -> str:
-    """从文本中提取已知后端标识符（基于 _VALID_IDS）"""
+    """从文本中提取已知后端标识符"""
     if not isinstance(text, str) or not _VALID_IDS:
         return ""
-    import re
     for ident in _VALID_IDS:
         if re.search(re.escape(ident), text, re.IGNORECASE):
             return ident
-    # 兜底：分词匹配
     words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", text)
     for w in words:
         if w.lower() in {v.lower() for v in _VALID_IDS}:
@@ -424,7 +392,7 @@ def _extract_backend(text: str) -> str:
     return ""
 
 def _verify_qasm(qasm: str) -> bool:
-    """用 run 执行 QASM（braket 本地模拟器），验证是否能正常跑通"""
+    """用 run 执行 QASM（braket 本地模拟器）验证是否能跑通"""
     try:
         result = run(qasm, "braket", 1024)
         if not isinstance(result, dict) or "counts" not in result:
@@ -435,8 +403,11 @@ def _verify_qasm(qasm: str) -> bool:
         return False
 
 def agent_chat(user_prompt: str) -> str:
-    """L2 智能体入口：LLM 自主判断意图，动态提示包含后端能力表"""
-    from llm_client import chat_completion
+    """L2 智能体入口"""
+    try:
+        from .llm_client import chat_completion
+    except ImportError:
+        from llm_client import chat_completion
 
     system_prompt = _build_system_prompt()
     messages = [
@@ -445,7 +416,6 @@ def agent_chat(user_prompt: str) -> str:
     ]
 
     last_output = ""
-    # 最多尝试 2 次（初次 + 1 次重试）
     for attempt in range(2):
         try:
             response = chat_completion(messages)
@@ -455,17 +425,14 @@ def agent_chat(user_prompt: str) -> str:
             last_output = f"LLM error: {e}"
             break
 
-        # 尝试提取 QASM 并验证
         qasm = _extract_qasm(output)
         if qasm and _verify_qasm(qasm):
             return qasm
 
-        # 尝试提取后端标识
         backend = _extract_backend(output)
         if backend:
             return backend
 
-        # 如果都无效，且还有重试机会，则反馈格式错误
         if attempt == 0:
             messages.append({"role": "assistant", "content": output})
             messages.append({
@@ -473,38 +440,95 @@ def agent_chat(user_prompt: str) -> str:
                 "content": "输出格式不正确。请只输出纯 QASM 代码或有效的后端 ID，不要添加任何额外文字。"
             })
 
-    # 最后一次尝试：尽量提取
     qasm = _extract_qasm(last_output)
     if qasm:
         return qasm
     backend = _extract_backend(last_output)
     if backend:
         return backend
-    return last_output  # 实在无法提取则原样返回
+    return last_output
 
 
 # ==================== L3 占位 ====================
 def compile_hybrid(hybrid_qasm_str: str) -> tuple:
     raise NotImplementedError("L3 not implemented")
 
-# ==================== 交互入口（可选） ====================
+
+# ==================== 交互入口（含小白指引和可视化） ====================
 if __name__ == "__main__":
     import sys
-    print("LoomQ Agent 交互模式 (输入 'exit' 退出)")
+
+    print("\n" + "="*60)
+    print("🌟 欢迎使用 LoomQ 量子计算助手！")
+    print("="*60)
+    print("量子计算利用量子比特（qubit）的叠加态和纠缠态进行计算。")
+    print("你可以用自然语言描述你想要实现的量子电路，我会帮你生成代码并运行。")
+    print("\n📌 试试输入以下示例：")
+    print("  - 生成一个 2 比特贝尔态")
+    print("  - 修改以下量子电路：OPENQASM 2.0; qreg q[2]; creg c[2]; h q[0]; cx q[0], q[1];")
+    print("  - 推荐一个 20 比特后端")
+    print("  - 运行刚才生成的电路（我会提示你）")
+    print("\n💡 输入 'exit' 退出，输入 'help' 查看帮助。")
+    print("="*60)
+
     while True:
         try:
             user_input = input("> ")
         except EOFError:
             break
+
         if user_input.lower() in ("exit", "quit"):
+            print("👋 再见！")
             break
+
+        if user_input.lower() == "help":
+            print("\n可用的命令示例：")
+            print("  - 生成一个 2 比特贝尔态")
+            print("  - 修改以下量子电路：OPENQASM 2.0; qreg q[2]; creg c[2]; h q[0]; cx q[0], q[1];")
+            print("  - 推荐一个 20 比特后端")
+            continue
+
         if not user_input.strip():
             continue
+
         try:
             reply = agent_chat(user_input)
             print(reply)
+
+            if "OPENQASM" in reply:
+                print("\n🔍 检测到量子电路代码。")
+                run_choice = input("是否在本地模拟器上运行此电路？(y/n): ").strip().lower()
+                if run_choice == 'y':
+                    qasm_extract = _extract_qasm(reply)
+                    if not qasm_extract:
+                        print("❌ 无法从回复中提取 QASM 代码，请检查格式。")
+                    else:
+                        print("⏳ 正在运行模拟...")
+                        try:
+                            result = run(qasm_extract, "braket", 1024)
+                            counts = result.get("counts", {})
+                            if counts:
+                                print("✅ 运行成功！测量结果如下：")
+                                total = sum(counts.values())
+                                for state, cnt in sorted(counts.items()):
+                                    prob = cnt / total * 100
+                                    bar = "█" * int(prob / 2)
+                                    print(f"  {state}: {cnt} ({prob:.1f}%) {bar}")
+                                print("\n📐 电路图：")
+                                print(draw_circuit_ascii(qasm_extract))
+                                try:
+                                    plot_counts_bar(counts, "测量结果分布")
+                                except Exception as e:
+                                    print(f"⚠️ 柱状图显示失败: {e}")
+                            else:
+                                print("⚠️ 运行结果为空。")
+                        except Exception as e:
+                            print(f"❌ 运行失败: {e}")
+                else:
+                    print("⏩ 跳过运行。")
+
             print("---")
+
         except Exception as e:
-            print(f"错误: {e}")
-
-
+            print(f"❌ 错误: {e}")
+            print("💡 如果输入格式有误，请尝试用更清晰的自然语言描述，或输入 'help' 查看示例。")

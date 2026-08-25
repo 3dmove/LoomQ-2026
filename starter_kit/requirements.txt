@@ -6,6 +6,8 @@ amazon-braket-sdk==1.84.0
 pyqpanda==3.8.5
 antlr4-python3-runtime==4.13.2
 
-# SpinQ: Python 3.10.20(separate environment)
+# SpinQ (separate environment)
 spinqit==0.2.4
 antlr4-python3-runtime==4.9.2
+qiskit>=1.0.0
+openai>=1.0.0

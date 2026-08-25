@@ -22,9 +22,9 @@
 平台名称：spinq
 平台 job ID：G-260825-0001, G-260825-0005
 运行时间：2026-08-25 01:35:12(北京时间), 2026-08-25 01:55:21
-shots：[填写]
+shots：1024
 实际执行的 QASM：Bell.qasm
-平台返回的原始结果：[填写仓库内路径]
+平台返回的原始结果：evidence/files/运行结果.jpg
 任务页截图：evidence/files/spinq_cloud_result_0001.png, spinq_cloud_result_0002.png
 ```
 
